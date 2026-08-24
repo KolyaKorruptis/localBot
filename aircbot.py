@@ -257,7 +257,12 @@ class IRCBot:
         self.ignore_list = set()
         self.user_conversations = {}
         self.user_message_buffer = {}
-        self.channel_conversation = []
+        # Plain-text transcript of recent channel activity, kept as a list of
+        # "nick: message" strings. Stored as text (not chat-role messages) so
+        # it can be embedded into a single user prompt, which is compatible
+        # with local models whose chat templates require strictly alternating
+        # user/assistant roles (e.g. Gemma).
+        self.channel_transcript = []
         self.channel_history_limit = 50
 
     def connect(self):
@@ -324,6 +329,16 @@ class IRCBot:
                     speaker_nickname=source,
                     log_callback=self.log_callback,
                 )
+
+                # Skip storing/sending when the LLM returned nothing, to avoid
+                # a null history entry and a literal "None" reply.
+                if not response:
+                    self.log_callback(
+                        f"LLM - No reply generated for ACTION from {source} "
+                        "(LLM error?).",
+                        bold=True,
+                    )
+                    return
 
                 self.user_conversations[source].append(
                     {"role": "user", "content": message}
@@ -508,6 +523,16 @@ class IRCBot:
                     logging_enabled=self.logging_enabled,
                 )
 
+                # If the LLM returned nothing (e.g. request error), do not
+                # store a null reply in the history (it would corrupt future
+                # requests) and do not send "None" to the user.
+                if not response:
+                    self.log_callback(
+                        f"LLM - No reply generated for {source} (LLM error?).",
+                        bold=True,
+                    )
+                    return
+
                 self.user_conversations[source].append(
                     {"role": "user", "content": message}
                 )
@@ -563,22 +588,11 @@ class IRCBot:
         pattern = r"(?<![\w])" + re.escape(self.nickname) + r"(?![\w])"
         return re.search(pattern, message, re.IGNORECASE) is not None
 
-    def record_channel_message(self, source, message):
-        # Keep a rolling window of recent channel activity so the bot can
-        # follow the conversation and reply with context when mentioned.
-        #
-        # Passive (non-mention) lines are stored as background CONTEXT using
-        # the system role, so the LLM treats them as information about the
-        # ongoing conversation and does NOT try to answer them. Only the line
-        # that mentions the bot is sent as a real user turn to answer.
-        self.channel_conversation.append(
-            {
-                "role": "system",
-                "content": f"[channel context] {source}: {message}",
-            }
-        )
-        if len(self.channel_conversation) > self.channel_history_limit:
-            self.channel_conversation = self.channel_conversation[
+    def record_channel_line(self, line):
+        # Append a plain-text line to the rolling channel transcript.
+        self.channel_transcript.append(line)
+        if len(self.channel_transcript) > self.channel_history_limit:
+            self.channel_transcript = self.channel_transcript[
                 -self.channel_history_limit :
             ]
 
@@ -594,12 +608,10 @@ class IRCBot:
         if source in self.ignore_list:
             return
 
-        # Passively read the channel for context. When the bot is NOT
-        # mentioned we only record the message and stop here. When it IS
-        # mentioned we let ask_LLM add the message (via query=) so it is not
-        # duplicated, and record it together with the reply afterwards.
+        # Passively read every channel message into the transcript for
+        # context. When the bot is NOT mentioned we only record and stop.
         if not self.is_mentioned(message):
-            self.record_channel_message(source, message)
+            self.record_channel_line(f"{source}: {message}")
             return
 
         if self.log_callback:
@@ -613,21 +625,30 @@ class IRCBot:
                 f"LLM - Generating channel reply for {source}...", bold=True
             )
 
-        # Channel replies are public and require no authentication. The shared
-        # channel history (recorded above) provides conversational context.
-        #
-        # Frame the query so the LLM knows the earlier "[channel context]"
-        # lines are only background, and that it must answer THIS message from
-        # the user who just mentioned it, not any previous unaddressed lines.
-        framed_query = (
-            f"The previous '[channel context]' lines are only background from "
-            f"the channel and must NOT be answered. Reply only to this new "
-            f"message in which {source} mentioned you: {message}"
-        )
+        # Build a single user prompt containing the recent channel transcript
+        # as background context plus the message to answer. Everything goes in
+        # ONE user message (with empty conversation_history) so the request is
+        # a valid system+user pair, compatible with models that require
+        # strictly alternating roles (e.g. Gemma).
+        recent_context = "\n".join(self.channel_transcript[-15:])
+        if recent_context:
+            framed_query = (
+                "Here is recent channel conversation for context only. Do NOT "
+                "reply to these earlier lines:\n"
+                f"{recent_context}\n\n"
+                f"Now reply only to this new message where {source} mentioned "
+                f"you: {message}"
+            )
+        else:
+            framed_query = (
+                f"Reply to this message where {source} mentioned you: {message}"
+            )
+
+        # Channel replies are public and require no authentication.
         try:
             response, role = ask_LLM(
                 query=framed_query,
-                conversation_history=self.channel_conversation,
+                conversation_history=[],
                 bot_nickname=self.nickname,
                 server=self.server,
                 channel=self.channel,
@@ -636,16 +657,18 @@ class IRCBot:
                 logging_enabled=self.logging_enabled,
             )
 
-            self.channel_conversation.append(
-                {"role": "user", "content": f"{source}: {message}"}
-            )
-            self.channel_conversation.append(
-                {"role": "assistant", "content": response}
-            )
-            if len(self.channel_conversation) > self.channel_history_limit:
-                self.channel_conversation = self.channel_conversation[
-                    -self.channel_history_limit :
-                ]
+            if not response:
+                if self.log_callback:
+                    self.log_callback(
+                        "LLM - No channel response generated (LLM error?).",
+                        bold=True,
+                    )
+                return
+
+            # Record both the mention and the bot's reply into the transcript
+            # so future replies stay in context.
+            self.record_channel_line(f"{source}: {message}")
+            self.record_channel_line(f"{self.nickname}: {response}")
 
             # Address the user who mentioned the bot at the start of the reply.
             self.send_message(self.channel, f"{source}: {response}")
