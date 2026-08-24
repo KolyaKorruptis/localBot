@@ -82,6 +82,7 @@ def ask_LLM(
     log_callback=None,
     logging_enabled=False,
     summary_mode=False,
+    extra_system=None,
 ):
     current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     news_items = fetch_news_from_feed(max_items=5)
@@ -115,6 +116,21 @@ def ask_LLM(
                 log_callback(f"Error in SYSTEM_PROMPT_TEMPLATE: Missing key {e}")
             raise
 
+    # Optional extra instructions/context appended to the system prompt (e.g.
+    # recent channel transcript). Kept in the system role so the model treats
+    # it as background/instructions and does not echo it into its reply.
+    if extra_system and not summary_mode:
+        system_prompt = f"{system_prompt}\n\n{extra_system}"
+
+    # Keep the "answer briefly" guidance in the system prompt rather than
+    # appending it to the user message, so small models cannot echo it back
+    # into their visible reply.
+    if not summary_mode:
+        system_prompt = (
+            f"{system_prompt}\n\nAnswer briefly and do not repeat the user's "
+            "message."
+        )
+
     request_messages = [{"role": "system", "content": system_prompt}]
     if conversation_history:
         conversation_history = conversation_history[-20:]
@@ -124,12 +140,7 @@ def ask_LLM(
             request_messages.append({"role": "system", "content": system_prompt})
 
     if query:
-        brief_query = (
-            f"{query.strip()} (please answer briefly)"
-            if not summary_mode
-            else query.strip()
-        )
-        request_messages.append({"role": "user", "content": brief_query})
+        request_messages.append({"role": "user", "content": query.strip()})
 
     # Cap the number of messages sent to the LLM, but always keep the leading
     # system prompt so the bot retains its persona and instructions even when
@@ -625,29 +636,30 @@ class IRCBot:
                 f"LLM - Generating channel reply for {source}...", bold=True
             )
 
-        # Build a single user prompt containing the recent channel transcript
-        # as background context plus the message to answer. Everything goes in
-        # ONE user message (with empty conversation_history) so the request is
-        # a valid system+user pair, compatible with models that require
-        # strictly alternating roles (e.g. Gemma).
+        # Put the recent channel transcript into the SYSTEM prompt as
+        # background context (via extra_system) and send only the actual
+        # message as the user query. This keeps instructions/context out of
+        # the user turn, so small models do not echo them back into the reply,
+        # and produces a valid system+user request for strict-role models.
         recent_context = "\n".join(self.channel_transcript[-15:])
         if recent_context:
-            framed_query = (
-                "Here is recent channel conversation for context only. Do NOT "
-                "reply to these earlier lines:\n"
+            extra_system = (
+                "Recent channel conversation (for context only, do NOT reply "
+                "to these earlier lines):\n"
                 f"{recent_context}\n\n"
-                f"Now reply only to this new message where {source} mentioned "
-                f"you: {message}"
+                f"Reply only to the latest message from {source}. Do not repeat "
+                "or quote the message; just answer it."
             )
         else:
-            framed_query = (
-                f"Reply to this message where {source} mentioned you: {message}"
+            extra_system = (
+                f"Reply directly to {source}. Do not repeat or quote their "
+                "message; just answer it."
             )
 
         # Channel replies are public and require no authentication.
         try:
             response, role = ask_LLM(
-                query=framed_query,
+                query=message,
                 conversation_history=[],
                 bot_nickname=self.nickname,
                 server=self.server,
@@ -655,6 +667,7 @@ class IRCBot:
                 speaker_nickname=source,
                 log_callback=self.log_callback,
                 logging_enabled=self.logging_enabled,
+                extra_system=extra_system,
             )
 
             if not response:
