@@ -9,6 +9,7 @@ import time
 import hashlib
 import irc.client
 import os
+import re
 import subprocess
 import json
 
@@ -116,7 +117,7 @@ def ask_LLM(
 
     request_messages = [{"role": "system", "content": system_prompt}]
     if conversation_history:
-        conversation_history = conversation_history[-10:]
+        conversation_history = conversation_history[-20:]
         request_messages.extend(conversation_history)
 
         if len(conversation_history) % 6 == 0:
@@ -130,8 +131,14 @@ def ask_LLM(
         )
         request_messages.append({"role": "user", "content": brief_query})
 
-    if len(request_messages) > 5:
-        request_messages = request_messages[-5:]
+    # Cap the number of messages sent to the LLM, but always keep the leading
+    # system prompt so the bot retains its persona and instructions even when
+    # there is a lot of channel context.
+    max_request_messages = 20
+    if len(request_messages) > max_request_messages:
+        request_messages = [request_messages[0]] + request_messages[
+            -(max_request_messages - 1) :
+        ]
 
     data = {"messages": request_messages}
 
@@ -250,6 +257,8 @@ class IRCBot:
         self.ignore_list = set()
         self.user_conversations = {}
         self.user_message_buffer = {}
+        self.channel_conversation = []
+        self.channel_history_limit = 50
 
     def connect(self):
         if self.log_callback:
@@ -364,6 +373,8 @@ class IRCBot:
 
         if event_type == "privmsg":
             self.on_private_message(connection, event)
+        elif event_type == "pubmsg":
+            self.on_public_message(connection, event)
         elif event_type == "mode":
             self.handle_mode_event(connection, event)
         elif event_type == "nick":
@@ -545,6 +556,104 @@ class IRCBot:
                 self.log_callback(f"LLM - Error generating response: {str(e)}")
         else:
             self.check_password(source, message)
+
+    def is_mentioned(self, message):
+        # Case-insensitive match of the bot nick as a whole word, so that
+        # substrings of longer nicks/words do not trigger a reply.
+        pattern = r"(?<![\w])" + re.escape(self.nickname) + r"(?![\w])"
+        return re.search(pattern, message, re.IGNORECASE) is not None
+
+    def record_channel_message(self, source, message):
+        # Keep a rolling window of recent channel activity so the bot can
+        # follow the conversation and reply with context when mentioned.
+        #
+        # Passive (non-mention) lines are stored as background CONTEXT using
+        # the system role, so the LLM treats them as information about the
+        # ongoing conversation and does NOT try to answer them. Only the line
+        # that mentions the bot is sent as a real user turn to answer.
+        self.channel_conversation.append(
+            {
+                "role": "system",
+                "content": f"[channel context] {source}: {message}",
+            }
+        )
+        if len(self.channel_conversation) > self.channel_history_limit:
+            self.channel_conversation = self.channel_conversation[
+                -self.channel_history_limit :
+            ]
+
+    def on_public_message(self, connection, event):
+        source = irc.client.NickMask(event.source).nick
+        message = event.arguments[0]
+
+        # Never react to ourselves.
+        if source == self.nickname:
+            return
+
+        # Never store or reply to ignored users.
+        if source in self.ignore_list:
+            return
+
+        # Passively read the channel for context. When the bot is NOT
+        # mentioned we only record the message and stop here. When it IS
+        # mentioned we let ask_LLM add the message (via query=) so it is not
+        # duplicated, and record it together with the reply afterwards.
+        if not self.is_mentioned(message):
+            self.record_channel_message(source, message)
+            return
+
+        if self.log_callback:
+            self.log_callback(
+                "_____________________________________________________ ____ __ _ _"
+            )
+            self.log_callback(
+                f"IRC - Channel mention from {source}: {message}", bold=True
+            )
+            self.log_callback(
+                f"LLM - Generating channel reply for {source}...", bold=True
+            )
+
+        # Channel replies are public and require no authentication. The shared
+        # channel history (recorded above) provides conversational context.
+        #
+        # Frame the query so the LLM knows the earlier "[channel context]"
+        # lines are only background, and that it must answer THIS message from
+        # the user who just mentioned it, not any previous unaddressed lines.
+        framed_query = (
+            f"The previous '[channel context]' lines are only background from "
+            f"the channel and must NOT be answered. Reply only to this new "
+            f"message in which {source} mentioned you: {message}"
+        )
+        try:
+            response, role = ask_LLM(
+                query=framed_query,
+                conversation_history=self.channel_conversation,
+                bot_nickname=self.nickname,
+                server=self.server,
+                channel=self.channel,
+                speaker_nickname=source,
+                log_callback=self.log_callback,
+                logging_enabled=self.logging_enabled,
+            )
+
+            self.channel_conversation.append(
+                {"role": "user", "content": f"{source}: {message}"}
+            )
+            self.channel_conversation.append(
+                {"role": "assistant", "content": response}
+            )
+            if len(self.channel_conversation) > self.channel_history_limit:
+                self.channel_conversation = self.channel_conversation[
+                    -self.channel_history_limit :
+                ]
+
+            # Address the user who mentioned the bot at the start of the reply.
+            self.send_message(self.channel, f"{source}: {response}")
+        except Exception as e:
+            if self.log_callback:
+                self.log_callback(
+                    f"LLM - Error generating channel response: {str(e)}"
+                )
 
     def sanitize_input(self, text):
         allowed_characters = (
