@@ -126,7 +126,7 @@ _Nothing scheduled yet - planned work will be listed here._
 
 ---
 
-## Features
+## All Features
 
 ### General
 - Connects to IRC servers and channels.
