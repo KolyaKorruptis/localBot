@@ -59,6 +59,17 @@ HELP_TEXT_FILE = config["help_text_file"]
 LOG_DIR = config["log_dir"]
 LLM_ENDPOINT = config["llm_endpoint"]
 
+# API key for the LLM endpoint, sent as an OpenAI-style bearer token. LM Studio
+# accepts one when its server is configured to require it, and the same header
+# works for any OpenAI-compatible endpoint or reverse proxy in front of it.
+#
+# The environment variable wins over config.json, so a key never has to be
+# written into a file that is tracked by git. Empty means no authentication.
+LLM_API_KEY_ENV = "LOCALBOT_LLM_API_KEY"
+LLM_API_KEY = os.environ.get(LLM_API_KEY_ENV, "").strip() or str(
+    config.get("llm_api_key", "")
+).strip()
+
 # Conventional port for IRC over TLS; used to auto-enable SSL in the UI.
 SSL_PORT = "6697"
 
@@ -98,6 +109,14 @@ def append_to_user_log(logging_enabled, nickname, summary):
     log_file = os.path.join(LOG_DIR, f"{nickname}.log")
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now()}]\n{summary}\n\n")
+
+
+def build_llm_headers():
+    """Headers for the LLM request, with bearer auth when a key is configured."""
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_KEY:
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+    return headers
 
 
 def ask_LLM(
@@ -172,7 +191,7 @@ def ask_LLM(
 
     data = {"messages": request_messages}
 
-    headers = {"Content-Type": "application/json"}
+    headers = build_llm_headers()
 
     # Example integration with OpenAI's API:
     #
@@ -221,12 +240,30 @@ def ask_LLM(
 
     try:
         response = requests.post(LLM_ENDPOINT, headers=headers, json=data)
+        if response.status_code in (401, 403):
+            # Surface this specifically: an authentication failure otherwise
+            # looks exactly like the model having nothing to say.
+            if log_callback:
+                if LLM_API_KEY:
+                    detail = "the configured API key was rejected"
+                else:
+                    detail = "the endpoint requires an API key and none is set"
+                log_callback(
+                    f"LLM - Authentication failed ({response.status_code}): "
+                    f"{detail}. Set {LLM_API_KEY_ENV} in the environment, or "
+                    '"llm_api_key" in config.json.',
+                    bold=True,
+                )
+            return None, None
         response.raise_for_status()
         result = response.json()
         assistant_message = result["choices"][0]["message"]
         return assistant_message["content"], assistant_message["role"]
     except Exception as e:
-        if log_callback and logging_enabled:
+        # Report errors whether or not AI logging is on: logging_enabled
+        # controls conversation summaries, not error reporting, and a silent
+        # failure here is indistinguishable from the bot ignoring the user.
+        if log_callback:
             log_callback(f"LLM - Error: {e}", bold=True)
         return None, None
 
@@ -334,6 +371,11 @@ class IRCBot:
             self.log_callback(
                 "LLM - Please always make sure local LLM is up and running!"
             )
+            if LLM_API_KEY:
+                self.log_callback(
+                    f"LLM - Using API key authentication (from "
+                    f"{'environment' if os.environ.get(LLM_API_KEY_ENV) else 'config.json'})."
+                )
             self.log_callback(
                 "BOT - If you modified me, check your endpoint and connection."
             )

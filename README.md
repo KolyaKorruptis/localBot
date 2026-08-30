@@ -46,6 +46,15 @@ merged are not listed here.
 - **Null replies are handled.** If a request fails, the bot logs it instead of
   sending a literal `None` to the channel or user, and the empty answer is kept
   out of the conversation history where it would corrupt later requests.
+- **API key authentication for the LLM endpoint.** localBot can send an
+  OpenAI-style bearer token with every request, for an LM Studio server
+  configured to require a key, or any OpenAI-compatible endpoint or reverse
+  proxy in front of one. The key can come from the `LOCALBOT_LLM_API_KEY`
+  environment variable so it never has to be written into a tracked file.
+- **Authentication failures are reported.** A `401`/`403` is named as such in
+  the console instead of looking like the model having nothing to say, and
+  errors are now logged whether or not AI logging is enabled - previously any
+  LLM error was silent unless summaries were switched on.
 - **More context per request.** Conversation history grew from 10 to 20
   messages and the per-request cap from 5 to 20, and the system prompt is now
   always retained when trimming, so the bot keeps its persona even with a busy
@@ -195,6 +204,26 @@ In the graphical interface, fill in the following fields:
 ### Customizing Configuration
 Options like the system prompt, summary prompt, logging directory, LLM endpoint, and other defaults are now managed via the `config.json` file. Modify `config.json` to update these values without changing the code.
 
+#### `llm_api_key`
+Empty by default, meaning no authentication. Set it to send an
+`Authorization: Bearer <key>` header with every LLM request:
+
+```json
+"llm_api_key": "your-key-here"
+```
+
+**Prefer the environment variable.** `config.json` is tracked by git, so a key
+written there is easy to commit by accident. `LOCALBOT_LLM_API_KEY` takes
+precedence over `config.json` when both are set:
+
+```bash
+export LOCALBOT_LLM_API_KEY="your-key-here"
+python localbot.py
+```
+
+The key is never written to the console or to the AI logs; on connect the bot
+only reports whether a key is in use and where it came from.
+
 #### `ssl_allow_self_signed`
 Off (`false`) by default. When SSL is enabled, localBot verifies the server's
 certificate chain and checks it matches the hostname you connected to. Some
@@ -284,13 +313,17 @@ Some features are not supported to avoid complexity, or for security reasons:
    - Hope if ignored for the session.
    - Restart the bot to reset blocks and ignores if you are the master.
 
-3. **AI Response Errors:**
+3. **LLM Authentication Errors:**
+   - `Authentication failed (401)` means the endpoint wants an API key. Set `LOCALBOT_LLM_API_KEY` or `llm_api_key` (see Configuration).
+   - If the key is set and still rejected, check it matches the one your LM Studio server (or proxy) expects, and that you copied it without surrounding whitespace.
+
+4. **AI Response Errors:**
    - Ensure LMStudio is running and accessible at `http://localhost:1234/v1/chat/completions`. A warning should be issued in the bot console if the local API is unreachable.
       - NOTE: To use a different endpoint for local LLMs, update the value in `config.json`.
    - If you modified the code to support an external API, check if your endpoint and parameters are correct for your model.
    - If you modified the system prompt, try adapting it to get better answers.
 
-4. **Strange(r) Things**
+5. **Strange(r) Things**
    - Reply quality and length depend upon which model you are using and relative settings, not on this program.
    - The included prompt is generally okay; you may want to change it to experiment with different results.
    - Also, try using different models and settings for different results.
