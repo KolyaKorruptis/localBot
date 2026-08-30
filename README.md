@@ -297,8 +297,8 @@ no honesty clause, and nothing reported it. A missing or blank
 `system_prompt.txt` now refuses to start.
 
 This README is the only documentation. There is no in-app help window: it
-duplicated what is written here and drifted out of date, at one point telling
-users that `/join` was disabled when it is supported. Modify `config.json` to update these values without changing the code.
+duplicated what is written here, and keeping the same facts in two places meant
+both copies drifted - it still described features that had been deleted.
 
 #### `llm_api_key`
 Empty by default, meaning no authentication. Set it to send an
