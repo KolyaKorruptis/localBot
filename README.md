@@ -10,8 +10,7 @@ This is a Python-based IRC bot that interacts with a local large language model,
 ## New Features
 
 Everything below is new in localBot and not present in upstream
-[AIRCBot](https://github.com/davidegat/AIRCBot). Fixes that upstream has since
-merged are not listed here.
+[AIRCBot](https://github.com/davidegat/AIRCBot). 
 
 ### Channel Interaction
 - **Replies to mentions in the channel.** When someone writes the bot's nick in
