@@ -4,9 +4,50 @@
 > [davidegat](https://github.com/davidegat), maintained independently since 2026.
 > It is not affiliated with or endorsed by the original project.
 
-This is a Python-based IRC bot that interacts with a local large language model, to provide conversational AI capabilities. The bot is able of joining an IRC channel, responding to direct messages, fetching the latest news, and managing authenticated user interactions. This document outlines how to install, configure, and use localBot effectively with LMStudio (https://lmstudio.ai/) locally.
+This is a Python-based IRC bot that interacts with a local large language model, to provide conversational AI capabilities.
 
-You can easily modify this software to use external APIs if needed (instructions in code comments).
+---
+## New Features
+
+Everything below is new in localBot and not present in upstream
+[AIRCBot](https://github.com/davidegat/AIRCBot). Fixes that upstream has since
+merged are not listed here.
+
+### Channel Interaction
+- **Replies to mentions in the channel.** When someone writes the bot's nick in
+  a public message, the bot answers in the channel and addresses that person by
+  nick. No OP/VOICE status and no authentication are required.
+- **Whole-word nick matching**, case-insensitive, so a nick appearing inside a
+  longer word or another nick does not trigger a reply.
+- **Passive channel reading.** The bot keeps a rolling transcript of the last 50
+  channel lines and feeds the most recent 15 to the LLM as background, so a
+  reply follows what the channel was actually talking about.
+- **Ignored users are neither answered nor recorded** in the transcript, and the
+  bot never reacts to its own messages.
+
+### LLM Handling
+- **Works with strict-role models.** Channel context is placed in the system
+  prompt instead of the user turn, producing a valid alternating system/user
+  request for models whose chat templates reject anything else (Gemma, for
+  example).
+- **The bot no longer echoes its own instructions.** The "answer briefly"
+  guidance moved out of the user message and into the system prompt, so small
+  models cannot repeat it back as part of a visible reply.
+- **Null replies are handled.** If a request fails, the bot logs it instead of
+  sending a literal `None` to the channel or user, and the empty answer is kept
+  out of the conversation history where it would corrupt later requests.
+- **More context per request.** Conversation history grew from 10 to 20
+  messages and the per-request cap from 5 to 20, and the system prompt is now
+  always retained when trimming, so the bot keeps its persona even with a busy
+  channel.
+
+### Project
+- Renamed from AIRCBot to localBot; the script is now `localbot.py`.
+- Added GPLv3 headers and fork attribution, which upstream did not carry.
+- Added a `.gitignore` for Python, Firebase, editor, and log artifacts.
+
+### Planned
+_Nothing scheduled yet - planned work will be listed here._
 
 ---
 
@@ -42,7 +83,7 @@ You can easily modify this software to use external APIs if needed (instructions
 - Requires password-based authentication for private messaging.
 - User will be de-authenticated upon: nick change, channel part, disconnection.
 - Implements basic anti-brute-force measures with temporary blocking for failed login attempts.
-- Uses a local LLM setup by default to increase privacy. 
+- Uses a local LLM setup by default to increase privacy.
 - Secure connection is supported by Python IRC libraries.
 - Inputs/Outputs sanitized to avoid LLM generating and sending raw commands if prompted to do so.
 - Implements an ignore system for users attempting to trick the LLM into generating raw commands (ignore list resets when the program restarts).
@@ -69,7 +110,7 @@ You can easily modify this software to use external APIs if needed (instructions
 - Tested on Python 3.9 or later.
 - Internet connection.
 - LMStudio (https://lmstudio.ai/) or equivalent local language model API.
-- Bot is configured to use LMStudio API at `http://localhost:1234/v1/chat/completions` endpoint (can be changed via `config.json` file). 
+- Bot is configured to use LMStudio API at `http://localhost:1234/v1/chat/completions` endpoint (can be changed via `config.json` file).
 - If you can't run a local LLM model, follow instructions in code comments to use your own external API endpoint (like OpenAI API - Please refer to OpenAI documentation for API access). Less privacy is to be expected in this use case. Beware external APIs can charge you money at each request!
 
 ### Python Libraries
@@ -111,7 +152,7 @@ pip install requests feedparser
    ```
 3. **LLM (LMStudio)**
    Make sure your local LLM is up and running before connecting to the IRC server, or you will only get a zombie bot parked on a channel.
-   
+
 ---
 
 ## Configuration
@@ -175,7 +216,7 @@ Make sure your local LLM is up and running, then:
 - Removing password protection from code seems not a good idea, but you decide.
 - Conversation history is different for each user; anyways, do not disclose personal information if using external APIs like OpenAI.
 - The bot is not multiuser in a true sense. Only one password is allowed to be set. Choose a **new one** before sharing it with other users. Do not reuse your own passwords, please.
-  
+
 ---
 
 ## Other Limitations
