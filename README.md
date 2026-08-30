@@ -49,8 +49,8 @@ merged are not listed here.
 - **API key authentication for the LLM endpoint.** localBot can send an
   OpenAI-style bearer token with every request, for an LM Studio server
   configured to require a key, or any OpenAI-compatible endpoint or reverse
-  proxy in front of one. The key can come from the `LOCALBOT_LLM_API_KEY`
-  environment variable so it never has to be written into a tracked file.
+  proxy in front of one. The key can come from the config or the
+  `LOCALBOT_LLM_API_KEY` environment variable.
 - **Authentication failures are reported.** A `401`/`403` is named as such in
   the console instead of looking like the model having nothing to say, and
   errors are now logged whether or not AI logging is enabled - previously any
