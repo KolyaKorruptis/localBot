@@ -146,6 +146,26 @@ pin the machine or stall the bot:
   `summary_prompt_file` settings, the *Enable AI Logging* checkbox and the
   *Open Log Folder* button. Conversations are now held in memory only.
 
+- **The channel message input is gone.** Upstream's GUI had a field that sent
+  whatever the operator typed straight to the channel as the bot. To everyone
+  reading, such a line is indistinguishable from a generated reply: same
+  nickname, same message, nothing to tell them apart. It also broke the one
+  invariant worth having, that the bot speaks only when addressed. Removed
+  along with its frame, Send button and handler. Say things in the channel as
+  yourself, from your own client.
+
+- **The `/kick` and `/op` shortcuts are gone.** localBot is a conversational
+  bot, not a channel-moderation bot, and offering a one-word kick invites using
+  it as one. Neither verb is actually blocked - both still reach the server
+  through the raw command passthrough in full IRC syntax - but the convenience
+  is no longer offered. `/join` remains refused, as upstream had it.
+
+- **The in-app help window is gone.** `help_text.txt` restated what this README
+  already covers, section for section, and keeping the same facts in two places
+  meant both drifted: it went on describing the summary logging weeks after it
+  was deleted. The bot is run from a checkout, so this README is never further
+  away than the help window was. Removed with the Help menu and `show_help`.
+
 ### Project
 - Renamed from AIRCBot to localBot; the script is now `localbot.py`.
 - Added GPLv3 headers and fork attribution, which upstream did not carry.
@@ -296,9 +316,8 @@ string, so one typo left the bot running with no persona, no brevity rule and
 no honesty clause, and nothing reported it. A missing or blank
 `system_prompt.txt` now refuses to start.
 
-This README is the only documentation. There is no in-app help window: it
-duplicated what is written here, and keeping the same facts in two places meant
-both copies drifted - it still described features that had been deleted.
+This README is the only documentation; there is no in-app help window (see
+*Removed*).
 
 #### `llm_api_key`
 Empty by default, meaning no authentication. Set it to send an
