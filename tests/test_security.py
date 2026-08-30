@@ -396,9 +396,11 @@ class UntrustedDataFraming(unittest.TestCase):
         import re as _re
         close = _re.search(r"<<<END_CHANNEL_LOG_[0-9a-f]{16}>>>", sys_prompt).group(0)
         terminator = sys_prompt.rindex(close)
+        # Something the operator wrote must be the last thing the model reads,
+        # after the untrusted block rather than only before it.
         self.assertLess(terminator, sys_prompt.index("End of untrusted log"))
-        self.assertIn("Answer briefly", sys_prompt)
-        self.assertLess(terminator, sys_prompt.index("Answer briefly"))
+        self.assertLess(terminator, sys_prompt.index("Reply solely"))
+        self.assertGreater(len(sys_prompt) - terminator, 100)
 
     def test_roles_stay_valid_for_strict_role_models(self):
         _, msgs = self._captured_system_prompt(["alice: hello"])

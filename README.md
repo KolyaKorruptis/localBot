@@ -96,9 +96,13 @@ pin the machine or stall the bot:
   prompt instead of the user turn, producing a valid alternating system/user
   request for models whose chat templates reject anything else (Gemma, for
   example).
-- **The bot no longer echoes its own instructions.** The "answer briefly"
-  guidance moved out of the user message and into the system prompt, so small
-  models cannot repeat it back as part of a visible reply.
+- **The bot no longer echoes its own instructions.** The brevity guidance moved
+  out of the user message and into `system_prompt.txt`, so small models cannot
+  repeat it back as part of a visible reply, and all prompt text now lives in
+  that file rather than being split between the file and the code.
+- **The bot does not pretend to be human.** Upstream's prompt told it to hide
+  its nature and simulate a person; it now says plainly that it is a bot if
+  anyone asks, and is told not to invent a human life or feelings.
 - **Null replies are handled.** If a request fails, the bot logs it instead of
   sending a literal `None` to the channel or user, and the empty answer is kept
   out of the conversation history where it would corrupt later requests.

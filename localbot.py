@@ -308,13 +308,6 @@ def ask_LLM(
     if extra_system:
         system_prompt = f"{system_prompt}\n\n{extra_system}"
 
-    # Keep the "answer briefly" guidance in the system prompt rather than
-    # appending it to the user message, so small models cannot echo it back
-    # into their visible reply.
-    system_prompt = (
-        f"{system_prompt}\n\nAnswer briefly and do not repeat the user's message."
-    )
-
     request_messages = [{"role": "system", "content": system_prompt}]
     if conversation_history:
         conversation_history = conversation_history[-20:]
