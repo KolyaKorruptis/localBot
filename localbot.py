@@ -28,7 +28,6 @@ from tkinter import ttk
 from tkinter import scrolledtext, messagebox
 import threading
 import requests
-import feedparser
 from datetime import datetime
 import time
 import hashlib
@@ -55,7 +54,6 @@ SYSTEM_PROMPT_FILE = config["system_prompt_file"]
 SUMMARY_PROMPT_FILE = config["summary_prompt_file"]
 HELP_TEXT_FILE = config["help_text_file"]
 LOG_DIR = config["log_dir"]
-FEED_URL = config["feed_url"]
 LLM_ENDPOINT = config["llm_endpoint"]
 nck = config["default_nickname"]
 srv = config["default_server"]
@@ -80,14 +78,6 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 
-def fetch_news_from_feed(max_items=1):
-    feed = feedparser.parse(FEED_URL)
-    items = []
-    for entry in feed.entries[:max_items]:
-        items.append({"title": entry.title, "link": entry.link})
-    return items
-
-
 def append_to_user_log(logging_enabled, nickname, summary):
     if not logging_enabled:
         return
@@ -110,14 +100,6 @@ def ask_LLM(
     extra_system=None,
 ):
     current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    news_items = fetch_news_from_feed(max_items=5)
-    news_section = (
-        "\n".join(
-            [f"{idx}) {item['title']}" for idx, item in enumerate(news_items, start=1)]
-        )
-        if news_items
-        else "No news found."
-    )
 
     if summary_mode:
         try:
@@ -134,7 +116,6 @@ def ask_LLM(
                 channel=channel,
                 speaker_nickname=speaker_nickname,
                 current_datetime=current_datetime,
-                news_section=news_section,
             )
         except KeyError as e:
             if log_callback:

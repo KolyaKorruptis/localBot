@@ -41,6 +41,12 @@ merged are not listed here.
   always retained when trimming, so the bot keeps its persona even with a busy
   channel.
 
+### Removed
+- **The RSS news feed is gone.** Upstream injected headlines from an external
+  feed into every system prompt; localBot no longer fetches them, drops the
+  `feedparser` dependency, and removes `feed_url` from `config.json`. Nothing
+  leaves the machine now except the request to your local LLM.
+
 ### Project
 - Renamed from AIRCBot to localBot; the script is now `localbot.py`.
 - Added GPLv3 headers and fork attribution, which upstream did not carry.
@@ -65,7 +71,6 @@ _Nothing scheduled yet - planned work will be listed here._
 - Uses a locally hosted language model (via LMStudio API - download: https://lmstudio.ai/) to generate replies.
 - Can be adapted to use remote API (like OpenAI - see comments in code for instructions).
 - Natural, context-aware language generation prompt, adapted for IRC interactions.
-- Fetches and references the latest news for conversations about current events.
 - Also aware of: time, date, IRC server, own nickname, user nickname.
 - Messages sent to the LLM include a "(please answer briefly)" suffix to ensure concise responses.
 
@@ -117,7 +122,6 @@ _Nothing scheduled yet - planned work will be listed here._
 Ensure the following libraries are installed and/or available:
 - `tkinter`
 - `requests`
-- `feedparser`
 - `threading`
 - `time`
 - `os`
@@ -131,7 +135,7 @@ If you plan to change the code to use external APIs, consider importing `openai`
 
 Install missing dependencies using (example):
 ```bash
-pip install requests feedparser
+pip install requests
 ```
 
 ---
@@ -194,15 +198,11 @@ Make sure your local LLM is up and running, then:
    - Once authenticated, users can interact with the bot's AI brain and get responses.
    - Users will be de-authenticated upon: nick change, channel part, disconnection.
 
-6. **News Integration:**
-   - The bot fetches the latest 3 news headlines and includes them in responses when/if relevant or if asked to.
-   - You can customize the RSS feed in `config.json`.
-
-7. **AI-Assisted Summaries:**
+6. **AI-Assisted Summaries:**
    - If logging is enabled, the bot will summarize user interactions every three messages.
    - Summaries are concise and saved to the `user_logs` directory under the user's nickname.
 
-8. **Notes on LMStudio**
+7. **Notes on LMStudio**
    - Tested with: Temp 0.55-0.65 / Response Length 100-150 / Context 2000 tokens
    - Similar results with different models, pick your favorite.
    - Download https://lmstudio.ai/
