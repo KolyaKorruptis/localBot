@@ -4,7 +4,7 @@
 > [davidegat](https://github.com/davidegat), maintained independently since 2026.
 > It is not affiliated with or endorsed by the original project.
 
-No, not Discord: IRC. This is a generally useless project for a Python-based IRC bot that interacts with a local large language model, to provide conversational AI capabilities. The bot is able of joining an IRC channel, responding to direct messages, fetching the latest news, and managing authenticated user interactions. This document outlines how to install, configure, and use localBot effectively with LMStudio (https://lmstudio.ai/) locally.
+This is a Python-based IRC bot that interacts with a local large language model, to provide conversational AI capabilities. The bot is able of joining an IRC channel, responding to direct messages, fetching the latest news, and managing authenticated user interactions. This document outlines how to install, configure, and use localBot effectively with LMStudio (https://lmstudio.ai/) locally.
 
 You can easily modify this software to use external APIs if needed (instructions in code comments).
 
