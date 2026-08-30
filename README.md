@@ -175,11 +175,23 @@ _Nothing scheduled yet - planned work will be listed here._
 
 ### Graphical Interface
 - Provides a Tkinter-based GUI for managing the bot and monitoring its activity.
-- Features connection setup, message and command sending, console logging.
+- Features connection setup, IRC command sending, and console logging.
 - Supports manual and automatic joining of channels.
 - Displays IRC server console logs in real-time.
 
 <img width="392" height="540" alt="localbot" src="https://github.com/user-attachments/assets/8d9bb3db-f131-4e15-94cf-393f7b1a79a7" />
+
+### The bot speaks only when addressed
+The bot sends a message to the channel in exactly one situation: someone
+mentioned its nickname and the model produced a reply. There is no operator
+field for typing chat into the channel as the bot.
+
+That is deliberate. A line typed by whoever is at the console is
+indistinguishable, to everyone in the channel, from something the bot
+generated - same nickname, same message, no way to tell them apart. If you want
+to say something in the channel, say it as yourself from your own client. It
+also means "the bot only speaks when spoken to" is a property you can rely on
+rather than a convention.
 
 ### Security
 - Requires password-based authentication for private messaging and for replies to `/me` actions.
@@ -193,7 +205,9 @@ _Nothing scheduled yet - planned work will be listed here._
 
 ### Command Management
 - Supports sending and receiving IRC commands, with validation for potentially unsafe inputs.
-- Command input field handles `/join`, `/kick`, `/quit`, `/whois` and `/op` (with short forms `/j`, `/k`, `/q`, `/w`, `/o`); anything else is passed to the server as a raw command.
+- Command input field handles `/msg`, `/topic`, `/whois` (`/w`) and `/quit` (`/q`). Anything else is passed to the server as a raw command, so any standard verb works if you write the full syntax.
+- `/join` (`/j`) is refused: use the **Join Channel** button or Auto-Join, so the bot only ever occupies the one channel it was configured for.
+- `/kick` and `/op` have no shortcuts. localBot is a conversational bot, not a channel-moderation bot, and giving it a one-word kick is an invitation to use it as one.
 - Automated responses to common channel interactions like receiving OP/VOICE.
 - Command logs are displayed in the GUI for transparency.
 
@@ -360,9 +374,9 @@ Make sure your local LLM is up and running, then:
    "Auto-Join" checkbox will ensure the bot will join channel upon connection, uncheck to get control over it.
    After connecting, click "Join Channel" to enter the specified IRC channel if Auto-Join is disabled.
 
-4. **Send Messages:**
-   - Use the message input field to send messages to the default channel.
-   - Use the command input field to send IRC commands (e.g., `/who`, `/mode`).
+4. **Send IRC Commands:**
+   - Use the command input field for IRC commands, for example `/msg NickServ REGISTER ...` to register the bot's nickname.
+   - There is deliberately no field for sending chat messages to the channel: see *The bot speaks only when addressed* below.
 
 5. **Private Messaging:**
    - Users can send direct messages to the bot.

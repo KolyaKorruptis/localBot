@@ -1390,7 +1390,6 @@ class App(tk.Tk):
         self.channel_var = tk.StringVar(value=f"{chn}")
         self.password_var = tk.StringVar()
         self.command_var = tk.StringVar()
-        self.msg_var = tk.StringVar()
         self.autojoin_var = tk.BooleanVar(value=True)
         self.ssl_var = tk.BooleanVar(value=str(prt) == SSL_PORT)
         # Operator kill switch. Unticking it stops every new generation
@@ -1455,18 +1454,6 @@ class App(tk.Tk):
         ttk.Button(action_frame, text="Disconnect", command=self.disconnect_bot).pack(
             side="left", padx=5
         )
-        msg_frame = ttk.LabelFrame(self, text="Send message to channel")
-        msg_frame.pack(padx=10, pady=10, fill="x")
-
-        self.msg_entry = ttk.Entry(msg_frame, textvariable=self.msg_var)
-        self.msg_entry.pack(side="left", fill="x", expand=True, padx=5, pady=5)
-
-        self.msg_entry.bind("<Return>", self.send_message)
-
-        ttk.Button(msg_frame, text="Send", command=self.send_message).pack(
-            side="right", padx=5, pady=5
-        )
-
         cmd_frame = ttk.LabelFrame(self, text="Send IRC Command")
         cmd_frame.pack(padx=10, pady=10, fill="x")
         cmd_entry = ttk.Entry(cmd_frame, textvariable=self.command_var)
@@ -1610,25 +1597,6 @@ class App(tk.Tk):
                 f"BOT - Join request sent for {self.bot.channel}.", bold=True
             )
 
-    def send_message(self, event=None):
-        if not self.bot or not self.bot.connection:
-            self.log_message(
-                "BOT - Not connected to any server. Please connect first ", bold=True
-            )
-            return
-
-        msg = self.msg_var.get().strip()
-        if msg:
-            try:
-                self.bot.connection.privmsg(self.bot.channel, msg)
-                self.log_message(
-                    f"BOT - Message sent to channel {self.bot.channel}: {msg}",
-                    bold=True,
-                )
-            except Exception as e:
-                self.log_message(f"BOT - Error sending message: {e} ", bold=True)
-        self.msg_var.set("")
-
     def send_irc_command(self):
         if not self.bot or not self.bot.connection:
             self.log_message(
@@ -1666,24 +1634,6 @@ class App(tk.Tk):
                         bold=True,
                     )
 
-            elif command in ["kick", "k"]:
-                # Format: /kick user [reason]
-                parts = params.split(" ", 1)
-                if len(parts) >= 1:
-                    user = parts[0]
-                    reason = parts[1] if len(parts) > 1 else ""
-                    self.bot.connection.send_raw(
-                        f"KICK {self.bot.channel} {user} :{reason}"
-                    )
-                    self.log_message(
-                        f"BOT - Command sent - KICK {self.bot.channel} {user} :{reason}",
-                        bold=True,
-                    )
-                else:
-                    self.log_message(
-                        "BOT - Invalid format for /kick. Use: /kick user [reason] ", bold=True
-                    )
-
             elif command == "topic":
                 # Format: /topic [new_topic]
                 topic = params if params else ""
@@ -1706,19 +1656,6 @@ class App(tk.Tk):
                 else:
                     self.log_message(
                         "BOT - Invalid format for /whois. Use: /whois user ", bold=True
-                    )
-
-            elif command in ["op", "o"]:
-                # Format: /op user
-                if params:
-                    self.bot.connection.send_raw(f"MODE {self.bot.channel} +o {params}")
-                    self.log_message(
-                        f"BOT - Command sent - MODE {self.bot.channel} +o {params}",
-                        bold=True,
-                    )
-                else:
-                    self.log_message(
-                        "BOT - Invalid format for /op. Use: /op user ", bold=True
                     )
 
             else:
