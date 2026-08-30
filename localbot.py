@@ -54,8 +54,12 @@ def load_config(file_path):
 
 config = load_config(CONFIG_FILE)
 
-SYSTEM_PROMPT_FILE = config["system_prompt_file"]
-HELP_TEXT_FILE = config["help_text_file"]
+# Prompt and help text live in fixed files next to the script. These were once
+# configurable, which only added a way to typo the path: load_prompt returned an
+# empty string for a missing file, so a mistyped system prompt left the bot
+# running with no persona, no brevity rule and no honesty clause, silently.
+SYSTEM_PROMPT_FILE = "system_prompt.txt"
+HELP_TEXT_FILE = "help_text.txt"
 LLM_ENDPOINT = config["llm_endpoint"]
 
 # API key for the LLM endpoint, sent as an OpenAI-style bearer token. LM Studio
@@ -134,16 +138,33 @@ srv = config["default_server"]
 prt = config["default_port"]
 chn = config["default_channel"]
 
-def load_prompt(file_path):
+def load_prompt(file_path, required=True):
+    """Read a prompt or help file.
+
+    A required file that is missing or blank is fatal. Returning an empty
+    string here used to be silent, and an empty system prompt does not look
+    like an error at runtime - the bot simply answers as an untuned model.
+    """
     try:
         with open(file_path, "r", encoding="utf-8") as file:
-            return file.read()
+            text = file.read()
     except FileNotFoundError:
+        if required:
+            raise FileNotFoundError(
+                f"Required file not found: {file_path} "
+                "(it must sit next to localbot.py)"
+            )
         return ""
+
+    if required and not text.strip():
+        raise ValueError(f"Required file is empty: {file_path}")
+    return text
 
 
 SYSTEM_PROMPT_TEMPLATE = load_prompt(SYSTEM_PROMPT_FILE)
-HELP_TEXT = load_prompt(HELP_TEXT_FILE)
+# The help window is a convenience, so a missing help file is not worth
+# refusing to start over.
+HELP_TEXT = load_prompt(HELP_TEXT_FILE, required=False) or "Help text not found."
 
 
 def hash_password(password):

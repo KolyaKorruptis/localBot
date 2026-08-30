@@ -274,7 +274,14 @@ In the graphical interface, fill in the following fields:
 - **AI Replies:** Kill switch. Untick to stop all new AI generation immediately, without disconnecting from the channel.
 
 ### Customizing Configuration
-Options like the system prompt, LLM endpoint, connection defaults and the abuse limits below are managed via the `config.json` file. Modify `config.json` to update these values without changing the code.
+The LLM endpoint, connection defaults and the abuse limits below are managed via the `config.json` file.
+
+`system_prompt.txt` and `help_text.txt` are read from fixed paths beside
+`localbot.py` and are deliberately **not** configurable. Pointing at them from
+`config.json` only created a way to mistype the path: a missing file used to
+load as an empty string, so one typo left the bot running with no persona, no
+brevity rule and no honesty clause, and nothing reported it. A missing or blank
+`system_prompt.txt` now refuses to start. Modify `config.json` to update these values without changing the code.
 
 #### `llm_api_key`
 Empty by default, meaning no authentication. Set it to send an

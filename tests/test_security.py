@@ -437,6 +437,39 @@ class UntrustedDataFraming(unittest.TestCase):
         self.assertEqual(bot.channel_transcript, [])
 
 
+class PromptLoading(unittest.TestCase):
+    """A missing or blank system prompt must stop the bot, not run untuned.
+
+    load_prompt used to return "" for a missing file, so one typo in a config
+    path left the bot answering as a bare model with no persona, no brevity
+    rule and no honesty clause, and nothing said so.
+    """
+
+    def test_missing_required_file_raises(self):
+        with self.assertRaises(FileNotFoundError) as ctx:
+            lb.load_prompt("definitely_not_here.txt")
+        self.assertIn("definitely_not_here.txt", str(ctx.exception))
+
+    def test_blank_required_file_raises(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+            fh.write("   \n\n  ")
+            path = fh.name
+        try:
+            with self.assertRaises(ValueError):
+                lb.load_prompt(path)
+        finally:
+            os.unlink(path)
+
+    def test_optional_file_may_be_missing(self):
+        self.assertEqual(lb.load_prompt("definitely_not_here.txt", required=False), "")
+
+    def test_the_real_system_prompt_loads_and_is_not_blank(self):
+        self.assertTrue(lb.SYSTEM_PROMPT_TEMPLATE.strip())
+        self.assertIn("{bot_nickname}", lb.SYSTEM_PROMPT_TEMPLATE)
+
+
 class SelfContamination(unittest.TestCase):
     """The bot's own replies must not be replayed to the channel as context.
 
