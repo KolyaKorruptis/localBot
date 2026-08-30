@@ -70,6 +70,38 @@ LLM_API_KEY = os.environ.get(LLM_API_KEY_ENV, "").strip() or str(
     config.get("llm_api_key", "")
 ).strip()
 
+# --- Abuse and resource limits -------------------------------------------
+# Every one of these exists so that a single user in the channel cannot pin the
+# machine's CPU/GPU or stall the bot. Channel input is treated as hostile.
+
+# Give up on a generation instead of waiting forever. Without this a hung
+# endpoint hangs the bot permanently, because IRC events and LLM requests share
+# one thread.
+LLM_CONNECT_TIMEOUT = float(config.get("llm_connect_timeout_seconds", 10))
+LLM_TIMEOUT = float(config.get("llm_timeout_seconds", 60))
+
+# Upper bound on generated tokens. This is the most direct cap on how long a
+# single request can occupy the model.
+LLM_MAX_TOKENS = int(config.get("llm_max_tokens", 300))
+
+# Longest reply the bot will put on the wire. IRC lines are capped near 512
+# bytes including the protocol prefix, and a long reply risks a flood kill.
+MAX_REPLY_LENGTH = int(config.get("max_reply_length", 400))
+
+# Largest prompt context assembled from channel chatter, in characters. Line
+# count alone is not a bound: a user can pad a single line.
+MAX_CONTEXT_CHARS = int(config.get("max_context_chars", 2000))
+MAX_LINE_CHARS = int(config.get("max_line_chars", 300))
+
+# How often one user may cause a generation, and how many the bot will do for
+# everyone combined in a rolling minute.
+REPLY_COOLDOWN = float(config.get("reply_cooldown_seconds", 10))
+REPLIES_PER_MINUTE = int(config.get("replies_per_minute", 8))
+
+# Generations allowed to run at once. Requests beyond this are dropped rather
+# than queued, so a burst cannot build a backlog.
+MAX_CONCURRENT_GENERATIONS = int(config.get("max_concurrent_generations", 1))
+
 # Conventional port for IRC over TLS; used to auto-enable SSL in the UI.
 SSL_PORT = "6697"
 
@@ -109,6 +141,50 @@ def append_to_user_log(logging_enabled, nickname, summary):
     log_file = os.path.join(LOG_DIR, f"{nickname}.log")
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"[{datetime.now()}]\n{summary}\n\n")
+
+
+def truncate_for_irc(text, limit=None):
+    """Clamp a reply to something that fits comfortably in one IRC line."""
+    limit = MAX_REPLY_LENGTH if limit is None else limit
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+class RateLimiter:
+    """Per-identity cooldown plus a global ceiling, both time based.
+
+    The identity is a hostmask rather than a nickname: a nickname is chosen by
+    the user and changing it is free, so anything keyed on one is not a limit.
+    """
+
+    def __init__(self, cooldown=REPLY_COOLDOWN, per_minute=REPLIES_PER_MINUTE):
+        self.cooldown = cooldown
+        self.per_minute = per_minute
+        self.last_seen = {}
+        self.recent = []
+        self.lock = threading.Lock()
+
+    def check(self, identity, now=None):
+        """Return (allowed, reason). Records the hit only when allowed."""
+        now = time.time() if now is None else now
+        with self.lock:
+            self.recent = [t for t in self.recent if now - t < 60]
+            if self.per_minute > 0 and len(self.recent) >= self.per_minute:
+                return False, "global limit reached"
+
+            previous = self.last_seen.get(identity)
+            if previous is not None and now - previous < self.cooldown:
+                wait = self.cooldown - (now - previous)
+                return False, f"cooling down, {wait:.0f}s left"
+
+            self.last_seen[identity] = now
+            self.recent.append(now)
+            return True, ""
+
+    def forget(self, identity):
+        with self.lock:
+            self.last_seen.pop(identity, None)
 
 
 def build_llm_headers():
@@ -189,7 +265,16 @@ def ask_LLM(
             -(max_request_messages - 1) :
         ]
 
+    # CAPABILITY ISOLATION - load-bearing, see tests/test_security.py.
+    # This payload carries messages and generation limits only. It must never
+    # gain "tools", "functions" or "tool_choice": the bot's defence against a
+    # user talking it into fetching a URL, reading a file or loading a model is
+    # that it has no mechanism to do so, not that such phrases are filtered.
+    # LLM_ENDPOINT is a module constant and is never derived from user input,
+    # and a model's reply is only ever sent as chat text.
     data = {"messages": request_messages}
+    if LLM_MAX_TOKENS > 0:
+        data["max_tokens"] = LLM_MAX_TOKENS
 
     headers = build_llm_headers()
 
@@ -239,7 +324,12 @@ def ask_LLM(
     # Note: The OpenAI API requires an active subscription or billing setup. Less privacy is expected too.
 
     try:
-        response = requests.post(LLM_ENDPOINT, headers=headers, json=data)
+        response = requests.post(
+            LLM_ENDPOINT,
+            headers=headers,
+            json=data,
+            timeout=(LLM_CONNECT_TIMEOUT, LLM_TIMEOUT),
+        )
         if response.status_code in (401, 403):
             # Surface this specifically: an authentication failure otherwise
             # looks exactly like the model having nothing to say.
@@ -259,6 +349,17 @@ def ask_LLM(
         result = response.json()
         assistant_message = result["choices"][0]["message"]
         return assistant_message["content"], assistant_message["role"]
+    except requests.exceptions.Timeout:
+        # Distinct from a generic error: the endpoint accepted the request and
+        # then took too long, which is what a resource-exhaustion attempt looks
+        # like from here.
+        if log_callback:
+            log_callback(
+                f"LLM - Timed out after {LLM_TIMEOUT:g}s, giving up on this "
+                "reply.",
+                bold=True,
+            )
+        return None, None
     except Exception as e:
         # Report errors whether or not AI logging is on: logging_enabled
         # controls conversation summaries, not error reporting, and a silent
@@ -335,6 +436,71 @@ class IRCBot:
         # user/assistant roles (e.g. Gemma).
         self.channel_transcript = []
         self.channel_history_limit = 50
+        # Operator kill switch: when False no generation is started at all.
+        self.ai_enabled = True
+        self.limiter = RateLimiter()
+        # Bounds how many generations run at once. Excess requests are dropped,
+        # not queued, so a burst cannot build a backlog that stalls the bot
+        # long after the burst is over.
+        self.generation_slots = threading.BoundedSemaphore(
+            max(1, MAX_CONCURRENT_GENERATIONS)
+        )
+
+    @staticmethod
+    def identity_of(event):
+        """Rate-limiting key for an event: the hostmask, not the nickname.
+
+        A nickname is chosen by the user and /nick is free, so a limit keyed on
+        one is not a limit. The host is not a perfect identity either - cloaks
+        are shared - but it costs something to change.
+        """
+        mask = irc.client.NickMask(event.source)
+        return (getattr(mask, "host", None) or mask.nick or "unknown").lower()
+
+    def allow_generation(self, event, source):
+        """Rate-limit gate. Logs and returns False when the request is denied."""
+        allowed, reason = self.limiter.check(self.identity_of(event))
+        if not allowed and self.log_callback:
+            self.log_callback(
+                f"BOT - Rate limited {source} ({reason}).", bold=True
+            )
+        return allowed
+
+    def dispatch_generation(self, label, work):
+        """Run an LLM generation off the IRC event thread.
+
+        The reactor and every handler share a single thread, so generating
+        inline stops the bot answering server PINGs for the duration - one slow
+        request is enough to get it disconnected.
+        """
+        if not self.ai_enabled:
+            if self.log_callback:
+                self.log_callback(
+                    f"BOT - AI replies are switched off, skipping {label}.",
+                    bold=True,
+                )
+            return False
+
+        if not self.generation_slots.acquire(blocking=False):
+            if self.log_callback:
+                self.log_callback(
+                    f"BOT - Busy, dropped {label} (max "
+                    f"{MAX_CONCURRENT_GENERATIONS} at a time).",
+                    bold=True,
+                )
+            return False
+
+        def runner():
+            try:
+                work()
+            except Exception as e:
+                if self.log_callback:
+                    self.log_callback(f"LLM - Error during {label}: {e}", bold=True)
+            finally:
+                self.generation_slots.release()
+
+        threading.Thread(target=runner, daemon=True).start()
+        return True
 
     def build_connect_factory(self):
         """Build the socket factory used for the IRC connection.
@@ -425,39 +591,45 @@ class IRCBot:
                         {"role": "system", "content": ""}
                     ]
 
+                if not self.allow_generation(event, source):
+                    return
+
                 self.log_callback(
                     f"LLM - Generating reply for ACTION from {source}...",
                     bold=True,
                 )
 
-                response, role = ask_LLM(
-                    query=message,
-                    conversation_history=self.user_conversations[source],
-                    bot_nickname=self.nickname,
-                    server=self.server,
-                    channel=self.channel,
-                    speaker_nickname=source,
-                    log_callback=self.log_callback,
-                )
-
-                # Skip storing/sending when the LLM returned nothing, to avoid
-                # a null history entry and a literal "None" reply.
-                if not response:
-                    self.log_callback(
-                        f"LLM - No reply generated for ACTION from {source} "
-                        "(LLM error?).",
-                        bold=True,
+                def generate():
+                    response, role = ask_LLM(
+                        query=message,
+                        conversation_history=self.user_conversations[source],
+                        bot_nickname=self.nickname,
+                        server=self.server,
+                        channel=self.channel,
+                        speaker_nickname=source,
+                        log_callback=self.log_callback,
                     )
-                    return
 
-                self.user_conversations[source].append(
-                    {"role": "user", "content": message}
-                )
-                self.user_conversations[source].append(
-                    {"role": "assistant", "content": response}
-                )
+                    # Skip storing/sending when the LLM returned nothing, to
+                    # avoid a null history entry and a literal "None" reply.
+                    if not response:
+                        self.log_callback(
+                            f"LLM - No reply generated for ACTION from {source} "
+                            "(LLM error?).",
+                            bold=True,
+                        )
+                        return
 
-                self.send_message(source, response)
+                    self.user_conversations[source].append(
+                        {"role": "user", "content": message}
+                    )
+                    self.user_conversations[source].append(
+                        {"role": "assistant", "content": response}
+                    )
+
+                    self.send_message(source, response)
+
+                self.dispatch_generation(f"ACTION reply to {source}", generate)
             else:
                 self.check_password(source, message)
 
@@ -620,8 +792,12 @@ class IRCBot:
                 self.user_message_buffer[source] = []
             self.user_message_buffer[source].append(message)
 
+            if not self.allow_generation(event, source):
+                return
+
             self.log_callback(f"LLM - Generating AI reply for {source}...", bold=True)
-            try:
+
+            def generate():
                 response, role = ask_LLM(
                     query=message,
                     conversation_history=self.user_conversations[source],
@@ -687,8 +863,8 @@ class IRCBot:
 
                     except Exception as e:
                         self.log_callback(f"LLM - Error generating summary: {str(e)}")
-            except Exception as e:
-                self.log_callback(f"LLM - Error generating response: {str(e)}")
+
+            self.dispatch_generation(f"private reply to {source}", generate)
         else:
             self.check_password(source, message)
 
@@ -699,16 +875,34 @@ class IRCBot:
         return re.search(pattern, message, re.IGNORECASE) is not None
 
     def record_channel_line(self, line):
-        # Append a plain-text line to the rolling channel transcript.
-        self.channel_transcript.append(line)
+        # Append a plain-text line to the rolling channel transcript. Lines are
+        # clamped because a line count alone is not a bound on prompt size: one
+        # user can pad a single message arbitrarily.
+        self.channel_transcript.append(truncate_for_irc(line, MAX_LINE_CHARS))
         if len(self.channel_transcript) > self.channel_history_limit:
             self.channel_transcript = self.channel_transcript[
                 -self.channel_history_limit :
             ]
 
+    def build_channel_context(self, max_lines=15):
+        """Recent channel lines, clamped to MAX_CONTEXT_CHARS characters."""
+        selected = []
+        total = 0
+        for line in reversed(self.channel_transcript[-max_lines:]):
+            if total + len(line) + 1 > MAX_CONTEXT_CHARS:
+                break
+            selected.append(line)
+            total += len(line) + 1
+        return "\n".join(reversed(selected))
+
     def on_public_message(self, connection, event):
         source = irc.client.NickMask(event.source).nick
         message = event.arguments[0]
+
+        # Only ever act on the channel we joined. Without this the bot would
+        # read and answer traffic from any channel it is pulled into.
+        if (event.target or "").lower() != (self.channel or "").lower():
+            return
 
         # Never react to ourselves.
         if source == self.nickname:
@@ -735,12 +929,17 @@ class IRCBot:
                 f"LLM - Generating channel reply for {source}...", bold=True
             )
 
+        # Gate before doing any work: a mention is free to send, a generation
+        # is not.
+        if not self.allow_generation(event, source):
+            return
+
         # Put the recent channel transcript into the SYSTEM prompt as
         # background context (via extra_system) and send only the actual
         # message as the user query. This keeps instructions/context out of
         # the user turn, so small models do not echo them back into the reply,
         # and produces a valid system+user request for strict-role models.
-        recent_context = "\n".join(self.channel_transcript[-15:])
+        recent_context = self.build_channel_context()
         if recent_context:
             extra_system = (
                 "Recent channel conversation (for context only, do NOT reply "
@@ -755,8 +954,10 @@ class IRCBot:
                 "message; just answer it."
             )
 
-        # Channel replies are public and require no authentication.
-        try:
+        # Channel replies are public and require no authentication, so this
+        # path is the most exposed one in the bot: it runs off-thread, under
+        # the concurrency cap, and only after the rate-limit gate above.
+        def generate():
             response, role = ask_LLM(
                 query=message,
                 conversation_history=[],
@@ -784,11 +985,8 @@ class IRCBot:
 
             # Address the user who mentioned the bot at the start of the reply.
             self.send_message(self.channel, f"{source}: {response}")
-        except Exception as e:
-            if self.log_callback:
-                self.log_callback(
-                    f"LLM - Error generating channel response: {str(e)}"
-                )
+
+        self.dispatch_generation(f"channel reply to {source}", generate)
 
     def sanitize_input(self, text):
         allowed_characters = (
@@ -859,7 +1057,7 @@ class IRCBot:
                 self.log_callback(f"BOT - Ignored {target}.", bold=True)
             return
 
-        sanitized_message = self.sanitize_input(message)
+        sanitized_message = truncate_for_irc(self.sanitize_input(message))
         if self.contains_irc_commands(sanitized_message):
             if self.log_callback:
                 self.log_callback(
@@ -1011,6 +1209,9 @@ class App(tk.Tk):
         self.autojoin_var = tk.BooleanVar(value=True)
         self.logging_var = tk.BooleanVar(value=False)
         self.ssl_var = tk.BooleanVar(value=str(prt) == SSL_PORT)
+        # Operator kill switch. Unticking it stops every new generation
+        # immediately, without disconnecting the bot from the channel.
+        self.ai_enabled_var = tk.BooleanVar(value=True)
         # While True, the SSL checkbox follows the port field. Ticking or
         # unticking the box by hand turns this off, so an explicit choice is
         # never overwritten by a later edit to the port.
@@ -1018,6 +1219,7 @@ class App(tk.Tk):
         self.bot = None
         self.logging_var.trace_add("write", self.handle_logging_change)
         self.port_var.trace_add("write", self.handle_port_change)
+        self.ai_enabled_var.trace_add("write", self.handle_ai_enabled_change)
 
         self.create_widgets()
         self.create_menu()
@@ -1075,6 +1277,9 @@ class App(tk.Tk):
         ttk.Checkbutton(
             param_frame, text="Enable AI Logging", variable=self.logging_var
         ).grid(row=4, column=2, sticky="w")
+        ttk.Checkbutton(
+            param_frame, text="AI Replies", variable=self.ai_enabled_var
+        ).grid(row=2, column=2, sticky="w")
 
         ttk.Label(param_frame, text="Password:").grid(row=4, column=0, sticky="e")
         ttk.Entry(param_frame, textvariable=self.password_var, show="*").grid(
@@ -1131,6 +1336,18 @@ class App(tk.Tk):
             return
         self.ssl_var.set(self.port_var.get().strip() == SSL_PORT)
 
+    def handle_ai_enabled_change(self, *args):
+        # Kill switch: takes effect on the next incoming message, and does not
+        # touch the IRC connection, so the bot stays in the channel.
+        enabled = self.ai_enabled_var.get()
+        if self.bot:
+            self.bot.ai_enabled = enabled
+        self.log_message(
+            "BOT - AI replies ENABLED." if enabled else
+            "BOT - AI replies DISABLED (kill switch). The bot stays connected.",
+            bold=True,
+        )
+
     def handle_ssl_toggle(self):
         # Only fires on a real click, not on programmatic .set() calls.
         self.ssl_follows_port = False
@@ -1162,6 +1379,7 @@ class App(tk.Tk):
             logging_var=self.logging_var.get(),
             use_ssl=self.ssl_var.get(),
         )
+        self.bot.ai_enabled = self.ai_enabled_var.get()
 
         self.bot.client.add_global_handler("endofmotd", self.handle_end_of_motd)
         self.bot.client.add_global_handler("nomotd", self.handle_end_of_motd)

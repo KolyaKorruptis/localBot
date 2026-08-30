@@ -35,6 +35,32 @@ merged are not listed here.
   SNI. Servers using a self-signed certificate can be reached by setting
   `ssl_allow_self_signed` in `config.json` (see Configuration).
 
+### Hardening
+Channel input is treated as hostile. These limits exist so that one user cannot
+pin the machine or stall the bot:
+
+- **Every LLM request has a timeout.** Previously there was none, and because
+  IRC events and generation shared a single thread, one hung request stopped
+  the bot answering server PINGs until it was disconnected.
+- **Generation runs off the IRC thread**, so the bot keeps talking to the
+  server while the model works. Requests beyond `max_concurrent_generations`
+  are **dropped rather than queued**, since a backlog only moves the stall.
+- **Rate limits are keyed on the hostmask, not the nickname.** `/nick` is free,
+  so anything keyed on a nickname is not a limit. There is a per-user cooldown
+  and a global ceiling per minute.
+- **A kill switch in the GUI.** The **AI Replies** checkbox stops all new
+  generation immediately without disconnecting the bot from the channel.
+- **Caps on prompt size, generated tokens, and reply length.** Context is
+  bounded in characters as well as lines, because one user can pad a single
+  line.
+- **The bot only reads and answers in the channel it joined.**
+- **Capability isolation.** The request carries messages and limits only, never
+  `tools`/`functions`, the endpoint is never derived from user input, and model
+  output is only ever sent as chat text. The bot cannot fetch a URL, read a
+  file or load a model because it has no mechanism to, which is a stronger
+  guarantee than filtering those phrases out of messages. `tests/test_security.py`
+  fails if any of that changes.
+
 ### LLM Handling
 - **Works with strict-role models.** Channel context is placed in the system
   prompt instead of the user turn, producing a valid alternating system/user
@@ -224,6 +250,24 @@ python localbot.py
 The key is never written to the console or to the AI logs; on connect the bot
 only reports whether a key is in use and where it came from.
 
+#### Abuse and resource limits
+All tunable in `config.json`. The defaults are deliberately conservative:
+
+| Key | Default | What it bounds |
+| --- | --- | --- |
+| `llm_connect_timeout_seconds` | `10` | Waiting for the endpoint to accept a connection |
+| `llm_timeout_seconds` | `60` | Waiting for a generation before giving up |
+| `llm_max_tokens` | `300` | Generated tokens - the most direct cap on model time |
+| `max_reply_length` | `400` | Characters put on the wire, to stay inside one IRC line |
+| `max_context_chars` | `2000` | Channel context assembled into a prompt |
+| `max_line_chars` | `300` | A single recorded channel line |
+| `reply_cooldown_seconds` | `10` | Seconds between generations for one hostmask |
+| `replies_per_minute` | `8` | Generations per rolling minute, everyone combined |
+| `max_concurrent_generations` | `1` | Generations in flight; extras are dropped |
+
+Setting `llm_timeout_seconds` to a very large value re-creates the original
+problem, where a stuck endpoint takes the bot down with it.
+
 #### `ssl_allow_self_signed`
 Off (`false`) by default. When SSL is enabled, localBot verifies the server's
 certificate chain and checks it matches the hostname you connected to. Some
@@ -273,6 +317,18 @@ Make sure your local LLM is up and running, then:
    - Tested with: Temp 0.55-0.65 / Response Length 100-150 / Context 2000 tokens
    - Similar results with different models, pick your favorite.
    - Download https://lmstudio.ai/
+
+---
+
+## Running the Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+`tests/test_security.py` covers the limits above, the rate limiter, the kill
+switch, and the capability-isolation guarantees. It is the file to run after
+touching anything in the message-handling path.
 
 ---
 
