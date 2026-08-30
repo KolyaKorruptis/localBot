@@ -18,8 +18,8 @@
     "auth_block_seconds": 900,
     "abuse_strike_limit": 5,
     "ssl_allow_self_signed": false,
-    "default_nickname": "Egidio",
-    "default_server": "ssl.ircnet.ovh",
-    "default_port": "6667",
-    "default_channel": "#casale"
+    "default_nickname": "Bathsheba",
+    "default_server": "ssl.ircnet.com",
+    "default_port": "6697",
+    "default_channel": "#example"
 }
