@@ -134,14 +134,14 @@ _Nothing scheduled yet - planned work will be listed here._
 - Authenticates users for private interactions.
 - Maintains a conversation history to provide contextually aware responses.
 - Features a personal conversation history for each user.
-- Limited interaction with channel (if asked by user via UI, or if OP/VOICE status is given).
+- Replies in the channel whenever its nickname is mentioned, and can also be made to speak from the UI. Channel replies need no OP/VOICE status.
 
 ### AI-Powered Conversations
 - Uses a locally hosted language model (via LMStudio API - download: https://lmstudio.ai/) to generate replies.
 - Can be adapted to use remote API (like OpenAI - see comments in code for instructions).
 - Natural, context-aware language generation prompt, adapted for IRC interactions.
-- Also aware of: time, date, IRC server, own nickname, user nickname.
-- Messages sent to the LLM include a "(please answer briefly)" suffix to ensure concise responses.
+- Also aware of: time, date, IRC server, channel, own nickname, user nickname.
+- Brevity is requested in the system prompt rather than appended to the user's message, so models cannot echo the instruction back into a reply.
 
 ### Graphical Interface
 - Provides a Tkinter-based GUI for managing the bot and monitoring its activity.
@@ -154,7 +154,8 @@ _Nothing scheduled yet - planned work will be listed here._
 ![image](https://github.com/user-attachments/assets/19530dc6-fd81-4e5f-b6f3-726a2fc4b0b2)
 
 ### Security
-- Requires password-based authentication for private messaging.
+- Requires password-based authentication for private messaging and for replies to `/me` actions.
+- Channel replies are deliberately **not** authenticated, since anyone in the channel can mention the bot. They are bounded instead: rate limited per hostmask, capped in length, and stoppable from the UI.
 - User will be de-authenticated upon: nick change, channel part, disconnection.
 - Anti-brute-force blocking for failed logins, counted per hostmask so that changing nickname does not reset it.
 - Uses a local LLM setup by default to increase privacy.
@@ -172,7 +173,7 @@ _Nothing scheduled yet - planned work will be listed here._
 
 ### Command Management
 - Supports sending and receiving IRC commands, with validation for potentially unsafe inputs.
-- Command input field allows sending IRC-specific commands, such as `/whois`, `/msg`, `/kick`, and others.
+- Command input field handles `/join`, `/kick`, `/quit`, `/whois` and `/op` (with short forms `/j`, `/k`, `/q`, `/w`, `/o`); anything else is passed to the server as a raw command.
 - Automated responses to common channel interactions like receiving OP/VOICE.
 - Command logs are displayed in the GUI for transparency.
 
