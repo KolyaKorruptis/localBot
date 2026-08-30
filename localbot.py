@@ -1774,9 +1774,6 @@ class App(tk.Tk):
     def on_enter_command(self, event):
         self.send_irc_command()
 
-    def on_enter_command(self, event):
-        self.send_irc_command()
-
     def log_message(self, text, bold=False):
         def _append():
             if bold:
