@@ -421,7 +421,7 @@ version 3**. See the [LICENSE](LICENSE) file for the full text.
 localBot is a modified version of AIRCBot, originally written by
 [davidegat](https://github.com/davidegat) and released under the same license.
 Copyright of the original work remains with its author; changes made in this
-fork are Copyright (C) 2026 Nicolai Sandow. A summary of those changes is in
+fork are Copyright (C) 2026 KolyaKorruptis. A summary of those changes is in
 the header of `localbot.py`, and the full record is in this repository's commit
 history.
 

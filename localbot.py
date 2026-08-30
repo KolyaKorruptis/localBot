@@ -1,12 +1,12 @@
 # localBot - an IRC bot with local LLM integration
 #
 # Copyright (C) 2024-2026 davidegat <https://github.com/davidegat>
-# Copyright (C) 2026 Nicolai Sandow <https://github.com/KolyaKorruptis>
+# Copyright (C) 2026 KolyaKorruptis <https://github.com/KolyaKorruptis>
 #
 # This file is part of localBot, a fork of AIRCBot by davidegat
 # (https://github.com/davidegat/AIRCBot).
 #
-# Modifications in this fork (2026, Nicolai Sandow):
+# Modifications in this fork (2026, KolyaKorruptis):
 #   - Renamed the project from AIRCBot to localBot.
 #   - Added replies to channel mentions, with passive context reading.
 #   - Fixed channel joining on servers that send no MOTD.
