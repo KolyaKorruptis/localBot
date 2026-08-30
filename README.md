@@ -149,8 +149,7 @@ _Nothing scheduled yet - planned work will be listed here._
 - Supports manual and automatic joining of channels.
 - Displays IRC server console logs in real-time.
 
-![image](https://github.com/user-attachments/assets/384b1112-b769-4e05-92d0-8d642bfd3d80)
-![image](https://github.com/user-attachments/assets/19530dc6-fd81-4e5f-b6f3-726a2fc4b0b2)
+<img width="392" height="540" alt="localbot" src="https://github.com/user-attachments/assets/8d9bb3db-f131-4e15-94cf-393f7b1a79a7" />
 
 ### Security
 - Requires password-based authentication for private messaging and for replies to `/me` actions.
@@ -161,8 +160,6 @@ _Nothing scheduled yet - planned work will be listed here._
 - Supports SSL/TLS connections, with certificate and hostname verification on by default.
 - Inputs/Outputs sanitized to avoid LLM generating and sending raw commands if prompted to do so.
 - Implements an ignore system for users attempting to trick the LLM into generating raw commands (ignore list resets when the program restarts). Ignores are keyed on the hostmask, and a channel can never be ignored.
-
-![image](https://github.com/user-attachments/assets/f21ea601-8cc8-4a9f-8d90-7084c0271f87)
 
 ### Logging Features
 - The bot logs summaries of conversations for authenticated users in the `user_logs` directory.
