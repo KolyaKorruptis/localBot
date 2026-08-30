@@ -54,12 +54,11 @@ def load_config(file_path):
 
 config = load_config(CONFIG_FILE)
 
-# Prompt and help text live in fixed files next to the script. These were once
+# The system prompt lives in a fixed file next to the script. It was once
 # configurable, which only added a way to typo the path: load_prompt returned an
-# empty string for a missing file, so a mistyped system prompt left the bot
-# running with no persona, no brevity rule and no honesty clause, silently.
+# empty string for a missing file, so a mistyped prompt left the bot running
+# with no persona, no brevity rule and no honesty clause, silently.
 SYSTEM_PROMPT_FILE = "system_prompt.txt"
-HELP_TEXT_FILE = "help_text.txt"
 LLM_ENDPOINT = config["llm_endpoint"]
 
 # API key for the LLM endpoint, sent as an OpenAI-style bearer token. LM Studio
@@ -162,9 +161,6 @@ def load_prompt(file_path, required=True):
 
 
 SYSTEM_PROMPT_TEMPLATE = load_prompt(SYSTEM_PROMPT_FILE)
-# The help window is a convenience, so a missing help file is not worth
-# refusing to start over.
-HELP_TEXT = load_prompt(HELP_TEXT_FILE, required=False) or "Help text not found."
 
 
 def hash_password(password):
@@ -1409,7 +1405,6 @@ class App(tk.Tk):
         self.ai_enabled_var.trace_add("write", self.handle_ai_enabled_change)
 
         self.create_widgets()
-        self.create_menu()
 
     def create_widgets(self):
         param_frame = ttk.LabelFrame(self, text="IRC Connection")
@@ -1752,25 +1747,6 @@ class App(tk.Tk):
             self.log_text.see(tk.END)
 
         self.after(0, _append)
-
-    def create_menu(self):
-        menubar = tk.Menu(self)
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="Help", command=self.show_help)
-        menubar.add_cascade(label="Menu", menu=help_menu)
-        self.config(menu=menubar)
-
-    def show_help(self):
-        help_window = tk.Toplevel(self)
-        help_window.title("Help")
-        help_window.geometry("600x600")
-
-        help_text_widget = scrolledtext.ScrolledText(
-            help_window, wrap="word", font=("Arial", 12), state="normal"
-        )
-        help_text_widget.insert("1.0", HELP_TEXT)
-        help_text_widget.configure(state="disabled")
-        help_text_widget.pack(fill="both", expand=True, padx=10, pady=10)
 
 
 if __name__ == "__main__":

@@ -176,7 +176,6 @@ _Nothing scheduled yet - planned work will be listed here._
 ### Graphical Interface
 - Provides a Tkinter-based GUI for managing the bot and monitoring its activity.
 - Features connection setup, message and command sending, console logging.
-- Includes a help menu for user guidance.
 - Supports manual and automatic joining of channels.
 - Displays IRC server console logs in real-time.
 
@@ -276,12 +275,16 @@ In the graphical interface, fill in the following fields:
 ### Customizing Configuration
 The LLM endpoint, connection defaults and the abuse limits below are managed via the `config.json` file.
 
-`system_prompt.txt` and `help_text.txt` are read from fixed paths beside
-`localbot.py` and are deliberately **not** configurable. Pointing at them from
-`config.json` only created a way to mistype the path: a missing file used to
-load as an empty string, so one typo left the bot running with no persona, no
-brevity rule and no honesty clause, and nothing reported it. A missing or blank
-`system_prompt.txt` now refuses to start. Modify `config.json` to update these values without changing the code.
+`system_prompt.txt` is read from a fixed path beside `localbot.py` and is
+deliberately **not** configurable. Pointing at it from `config.json` only
+created a way to mistype the path: a missing file used to load as an empty
+string, so one typo left the bot running with no persona, no brevity rule and
+no honesty clause, and nothing reported it. A missing or blank
+`system_prompt.txt` now refuses to start.
+
+This README is the only documentation. There is no in-app help window: it
+duplicated what is written here and drifted out of date, at one point telling
+users that `/join` was disabled when it is supported. Modify `config.json` to update these values without changing the code.
 
 #### `llm_api_key`
 Empty by default, meaning no authentication. Set it to send an
