@@ -79,6 +79,13 @@ pin the machine or stall the bot:
   newlines, but the bot's own replies are recorded there too and models do emit
   them, so a multi-line reply could otherwise plant a forged line attributed to
   another user. Lines are flattened before being recorded.
+- **Channel context is fenced as untrusted data.** The transcript reaches the
+  model inside a delimiter carrying a random nonce generated per request, and
+  is explicitly labelled as data written by strangers rather than instructions.
+  Because the nonce cannot be guessed, a user who writes a convincing closing
+  marker stays inside the fenced region. The trusted instructions are placed
+  *after* the block, so the last thing the model reads is yours, not theirs.
+  This narrows prompt injection; it does not eliminate it - see below.
 - **A tripwire for tool calls.** The bot never requests tools, so a compliant
   endpoint cannot return a tool call. If one arrives anyway, the reply is
   refused and reported loudly - it means the endpoint gained capabilities of
@@ -409,6 +416,13 @@ console instead of a silent empty reply.
 > Capability isolation limits the blast radius; it does not stop prompt
 > injection. A channel user can still influence the *wording* of a reply. What
 > they cannot do is cause an action, because no mechanism to act exists.
+>
+> The fencing described above raises the cost of injection - untrusted text is
+> labelled, delimited with an unguessable nonce, confined to one line per
+> entry, and followed by the real instructions - but no prompt-level defence is
+> absolute. A sufficiently persuasive message can still steer a reply's tone or
+> content. Treat the bot's channel output as untrusted itself, and never wire
+> it to anything that acts.
 
 ---
 
