@@ -9,6 +9,7 @@ import time
 import hashlib
 import irc.client
 import os
+import re
 import subprocess
 import json
 
@@ -81,6 +82,7 @@ def ask_LLM(
     log_callback=None,
     logging_enabled=False,
     summary_mode=False,
+    extra_system=None,
 ):
     current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     news_items = fetch_news_from_feed(max_items=5)
@@ -114,24 +116,40 @@ def ask_LLM(
                 log_callback(f"Error in SYSTEM_PROMPT_TEMPLATE: Missing key {e}")
             raise
 
+    # Optional extra instructions/context appended to the system prompt (e.g.
+    # recent channel transcript). Kept in the system role so the model treats
+    # it as background/instructions and does not echo it into its reply.
+    if extra_system and not summary_mode:
+        system_prompt = f"{system_prompt}\n\n{extra_system}"
+
+    # Keep the "answer briefly" guidance in the system prompt rather than
+    # appending it to the user message, so small models cannot echo it back
+    # into their visible reply.
+    if not summary_mode:
+        system_prompt = (
+            f"{system_prompt}\n\nAnswer briefly and do not repeat the user's "
+            "message."
+        )
+
     request_messages = [{"role": "system", "content": system_prompt}]
     if conversation_history:
-        conversation_history = conversation_history[-10:]
+        conversation_history = conversation_history[-20:]
         request_messages.extend(conversation_history)
 
         if len(conversation_history) % 6 == 0:
             request_messages.append({"role": "system", "content": system_prompt})
 
     if query:
-        brief_query = (
-            f"{query.strip()} (please answer briefly)"
-            if not summary_mode
-            else query.strip()
-        )
-        request_messages.append({"role": "user", "content": brief_query})
+        request_messages.append({"role": "user", "content": query.strip()})
 
-    if len(request_messages) > 5:
-        request_messages = request_messages[-5:]
+    # Cap the number of messages sent to the LLM, but always keep the leading
+    # system prompt so the bot retains its persona and instructions even when
+    # there is a lot of channel context.
+    max_request_messages = 20
+    if len(request_messages) > max_request_messages:
+        request_messages = [request_messages[0]] + request_messages[
+            -(max_request_messages - 1) :
+        ]
 
     data = {"messages": request_messages}
 
@@ -250,6 +268,13 @@ class IRCBot:
         self.ignore_list = set()
         self.user_conversations = {}
         self.user_message_buffer = {}
+        # Plain-text transcript of recent channel activity, kept as a list of
+        # "nick: message" strings. Stored as text (not chat-role messages) so
+        # it can be embedded into a single user prompt, which is compatible
+        # with local models whose chat templates require strictly alternating
+        # user/assistant roles (e.g. Gemma).
+        self.channel_transcript = []
+        self.channel_history_limit = 50
 
     def connect(self):
         if self.log_callback:
@@ -316,6 +341,16 @@ class IRCBot:
                     log_callback=self.log_callback,
                 )
 
+                # Skip storing/sending when the LLM returned nothing, to avoid
+                # a null history entry and a literal "None" reply.
+                if not response:
+                    self.log_callback(
+                        f"LLM - No reply generated for ACTION from {source} "
+                        "(LLM error?).",
+                        bold=True,
+                    )
+                    return
+
                 self.user_conversations[source].append(
                     {"role": "user", "content": message}
                 )
@@ -364,6 +399,8 @@ class IRCBot:
 
         if event_type == "privmsg":
             self.on_private_message(connection, event)
+        elif event_type == "pubmsg":
+            self.on_public_message(connection, event)
         elif event_type == "mode":
             self.handle_mode_event(connection, event)
         elif event_type == "nick":
@@ -497,6 +534,16 @@ class IRCBot:
                     logging_enabled=self.logging_enabled,
                 )
 
+                # If the LLM returned nothing (e.g. request error), do not
+                # store a null reply in the history (it would corrupt future
+                # requests) and do not send "None" to the user.
+                if not response:
+                    self.log_callback(
+                        f"LLM - No reply generated for {source} (LLM error?).",
+                        bold=True,
+                    )
+                    return
+
                 self.user_conversations[source].append(
                     {"role": "user", "content": message}
                 )
@@ -545,6 +592,104 @@ class IRCBot:
                 self.log_callback(f"LLM - Error generating response: {str(e)}")
         else:
             self.check_password(source, message)
+
+    def is_mentioned(self, message):
+        # Case-insensitive match of the bot nick as a whole word, so that
+        # substrings of longer nicks/words do not trigger a reply.
+        pattern = r"(?<![\w])" + re.escape(self.nickname) + r"(?![\w])"
+        return re.search(pattern, message, re.IGNORECASE) is not None
+
+    def record_channel_line(self, line):
+        # Append a plain-text line to the rolling channel transcript.
+        self.channel_transcript.append(line)
+        if len(self.channel_transcript) > self.channel_history_limit:
+            self.channel_transcript = self.channel_transcript[
+                -self.channel_history_limit :
+            ]
+
+    def on_public_message(self, connection, event):
+        source = irc.client.NickMask(event.source).nick
+        message = event.arguments[0]
+
+        # Never react to ourselves.
+        if source == self.nickname:
+            return
+
+        # Never store or reply to ignored users.
+        if source in self.ignore_list:
+            return
+
+        # Passively read every channel message into the transcript for
+        # context. When the bot is NOT mentioned we only record and stop.
+        if not self.is_mentioned(message):
+            self.record_channel_line(f"{source}: {message}")
+            return
+
+        if self.log_callback:
+            self.log_callback(
+                "_____________________________________________________ ____ __ _ _"
+            )
+            self.log_callback(
+                f"IRC - Channel mention from {source}: {message}", bold=True
+            )
+            self.log_callback(
+                f"LLM - Generating channel reply for {source}...", bold=True
+            )
+
+        # Put the recent channel transcript into the SYSTEM prompt as
+        # background context (via extra_system) and send only the actual
+        # message as the user query. This keeps instructions/context out of
+        # the user turn, so small models do not echo them back into the reply,
+        # and produces a valid system+user request for strict-role models.
+        recent_context = "\n".join(self.channel_transcript[-15:])
+        if recent_context:
+            extra_system = (
+                "Recent channel conversation (for context only, do NOT reply "
+                "to these earlier lines):\n"
+                f"{recent_context}\n\n"
+                f"Reply only to the latest message from {source}. Do not repeat "
+                "or quote the message; just answer it."
+            )
+        else:
+            extra_system = (
+                f"Reply directly to {source}. Do not repeat or quote their "
+                "message; just answer it."
+            )
+
+        # Channel replies are public and require no authentication.
+        try:
+            response, role = ask_LLM(
+                query=message,
+                conversation_history=[],
+                bot_nickname=self.nickname,
+                server=self.server,
+                channel=self.channel,
+                speaker_nickname=source,
+                log_callback=self.log_callback,
+                logging_enabled=self.logging_enabled,
+                extra_system=extra_system,
+            )
+
+            if not response:
+                if self.log_callback:
+                    self.log_callback(
+                        "LLM - No channel response generated (LLM error?).",
+                        bold=True,
+                    )
+                return
+
+            # Record both the mention and the bot's reply into the transcript
+            # so future replies stay in context.
+            self.record_channel_line(f"{source}: {message}")
+            self.record_channel_line(f"{self.nickname}: {response}")
+
+            # Address the user who mentioned the bot at the start of the reply.
+            self.send_message(self.channel, f"{source}: {response}")
+        except Exception as e:
+            if self.log_callback:
+                self.log_callback(
+                    f"LLM - Error generating channel response: {str(e)}"
+                )
 
     def sanitize_input(self, text):
         allowed_characters = (
