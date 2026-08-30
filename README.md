@@ -196,8 +196,6 @@ _Nothing scheduled yet - planned work will be listed here._
 - Supports manual and automatic joining of channels.
 - Displays IRC server console logs in real-time.
 
-<img width="392" height="540" alt="localbot" src="https://github.com/user-attachments/assets/8d9bb3db-f131-4e15-94cf-393f7b1a79a7" />
-
 ### Security
 - Requires password-based authentication for private messaging and for replies to `/me` actions.
 - Channel replies are deliberately **not** authenticated, since anyone in the channel can mention the bot. They are bounded instead: rate limited per hostmask, capped in length, and stoppable from the UI.
