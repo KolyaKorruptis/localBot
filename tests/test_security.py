@@ -47,12 +47,17 @@ def make_bot(**overrides):
     bot.channel = "#chan"
     bot.server = "irc.example.net"
     bot.log_callback = lambda msg, bold=False: None
-    bot.ignore_list = set()
+    bot.ignore_list = lb.BoundedSet()
     bot.authenticated_users = {}
     bot.user_conversations = {}
     bot.user_message_buffer = {}
-    bot.failed_attempts = {}
-    bot.last_attempt_time = {}
+    bot.failed_attempts = lb.BoundedDict()
+    bot.last_attempt_time = lb.BoundedDict()
+    bot.abuse_strikes = lb.BoundedDict()
+    bot.nick_hosts = lb.BoundedDict()
+    bot.authenticated_users = lb.BoundedDict()
+    bot.user_conversations = lb.BoundedDict()
+    bot.user_message_buffer = lb.BoundedDict()
     bot.channel_transcript = []
     bot.channel_history_limit = 50
     bot.ai_enabled = True
@@ -251,6 +256,157 @@ class ChannelScoping(unittest.TestCase):
         bot.record_channel_line = recorded.append
         bot.on_public_message(None, FakeEvent("a!u@h", "#chan", ["just chatting"]))
         self.assertEqual(recorded, ["a: just chatting"])
+
+
+class AbuseTrackingIdentity(unittest.TestCase):
+    """Item 5: abuse tracking keyed on the hostmask, counters kept separate."""
+
+    def _bot_with_password(self, password="correct-horse"):
+        bot = make_bot()
+        bot.password_hash = lb.hash_password(password)
+        bot.connection = object()
+        bot.notify = lambda *a, **kw: None
+        bot.send_message = lambda *a, **kw: None
+        return bot
+
+    def test_lockout_survives_nick_cycling(self):
+        """The bypass demonstrated before this change must now fail."""
+        bot = self._bot_with_password()
+        for i in range(lb.AUTH_FAILURE_LIMIT):
+            bot.nick_hosts[f"mallory{i}"] = "host.example"
+            bot.check_password(f"mallory{i}", "wrong")
+        self.assertEqual(bot.failed_attempts["host.example"], lb.AUTH_FAILURE_LIMIT)
+
+        bot.nick_hosts["freshnick"] = "host.example"
+        bot.check_password("freshnick", "correct-horse")
+        self.assertNotIn(
+            "freshnick",
+            bot.authenticated_users,
+            "changing nickname let a locked-out host authenticate",
+        )
+
+    def test_lockout_does_not_follow_a_different_host(self):
+        bot = self._bot_with_password()
+        for i in range(lb.AUTH_FAILURE_LIMIT):
+            bot.nick_hosts["mallory"] = "bad.example"
+            bot.check_password("mallory", "wrong")
+        bot.nick_hosts["alice"] = "good.example"
+        bot.check_password("alice", "correct-horse")
+        self.assertTrue(bot.authenticated_users.get("alice"))
+
+    def test_output_strikes_do_not_share_the_password_budget(self):
+        bot = make_bot()
+        bot.nick_hosts["mallory"] = "host.example"
+        bot.connection = object()
+        bot.notify = lambda *a, **kw: None
+        for _ in range(lb.ABUSE_STRIKE_LIMIT):
+            bot.handle_blocked_output("mallory", "JOIN #evil", "mallory")
+        self.assertEqual(bot.abuse_strikes["host.example"], lb.ABUSE_STRIKE_LIMIT)
+        self.assertNotIn(
+            "host.example",
+            bot.failed_attempts,
+            "output strikes leaked into the password lockout counter",
+        )
+
+    def test_a_channel_is_never_ignored(self):
+        """A blocked channel reply must not silence the bot everywhere."""
+        bot = make_bot()
+        bot.connection = object()
+        bot.notify = lambda *a, **kw: None
+        for _ in range(lb.ABUSE_STRIKE_LIMIT * 2):
+            bot.handle_blocked_output("#chan", "JOIN #evil", "#chan")
+        self.assertNotIn("#chan", bot.ignore_list)
+        self.assertFalse(bot.is_ignored("#chan"))
+
+    def test_blocked_channel_reply_is_charged_to_the_mentioner(self):
+        bot = make_bot()
+        bot.nick_hosts["mallory"] = "host.example"
+        bot.connection = object()
+        bot.notify = lambda *a, **kw: None
+        bot.handle_blocked_output("#chan", "JOIN #evil", "mallory")
+        self.assertEqual(bot.abuse_strikes["host.example"], 1)
+        self.assertNotIn("#chan", bot.abuse_strikes)
+
+    def test_unattributed_output_charges_nobody(self):
+        bot = make_bot()
+        bot.connection = object()
+        bot.handle_blocked_output("someone", "JOIN #evil", None)
+        self.assertEqual(len(bot.abuse_strikes), 0)
+
+    def test_ignore_follows_the_host_across_nicks(self):
+        bot = make_bot()
+        bot.nick_hosts["mallory"] = "host.example"
+        bot.nick_hosts["mallory2"] = "host.example"
+        bot.ignore_list.add("host.example")
+        self.assertTrue(bot.is_ignored("mallory"))
+        self.assertTrue(bot.is_ignored("mallory2"))
+
+
+class BoundedState(unittest.TestCase):
+    """Item 7: no per-user map may grow without limit."""
+
+    def test_bounded_dict_evicts_oldest(self):
+        d = lb.BoundedDict(max_entries=3)
+        for i in range(10):
+            d[f"k{i}"] = i
+        self.assertEqual(len(d), 3)
+        self.assertIn("k9", d)
+        self.assertNotIn("k0", d)
+
+    def test_bounded_set_evicts_oldest(self):
+        st = lb.BoundedSet(max_entries=3)
+        for i in range(10):
+            st.add(f"k{i}")
+        self.assertEqual(len(st), 3)
+        self.assertIn("k9", st)
+        self.assertNotIn("k0", st)
+
+    def test_nick_cycling_cannot_grow_state_without_limit(self):
+        bot = make_bot()
+        bot.nick_hosts = lb.BoundedDict(max_entries=50)
+        bot.failed_attempts = lb.BoundedDict(max_entries=50)
+        bot.password_hash = lb.hash_password("pw")
+        bot.connection = object()
+        bot.notify = lambda *a, **kw: None
+        bot.send_message = lambda *a, **kw: None
+        for i in range(5000):
+            bot.nick_hosts[f"nick{i}"] = f"host{i}.example"
+            bot.check_password(f"nick{i}", "wrong")
+        self.assertLessEqual(len(bot.nick_hosts), 50)
+        self.assertLessEqual(len(bot.failed_attempts), 50)
+
+    def test_raw_message_signatures_are_bounded(self):
+        bot = make_bot()
+        bot.logged_messages = lb.BoundedSet(100)
+        for i in range(1000):
+            bot.logged_messages.add(f"sig{i}")
+        self.assertLessEqual(len(bot.logged_messages), 100)
+
+    def test_rate_limiter_prunes_its_identity_map(self):
+        limiter = lb.RateLimiter(cooldown=0.001, per_minute=0)
+        now = time.time()
+        for i in range(lb.MAX_TRACKED_USERS + 200):
+            limiter.check(f"host{i}.example", now=now + i)
+        self.assertLessEqual(len(limiter.last_seen), lb.MAX_TRACKED_USERS + 200)
+        self.assertLess(len(limiter.last_seen), 400)
+
+
+class ByteBounds(unittest.TestCase):
+    """Item 6 completion: the IRC line limit is bytes, not characters."""
+
+    def test_multibyte_reply_is_clamped_in_bytes(self):
+        reply = "ü" * lb.MAX_REPLY_LENGTH          # 2 bytes each
+        out = lb.truncate_for_irc(reply)
+        self.assertLessEqual(len(out.encode("utf-8")), lb.MAX_REPLY_BYTES)
+
+    def test_truncation_never_splits_a_character(self):
+        out = lb.truncate_for_irc("é" * 5000)
+        out.encode("utf-8").decode("utf-8")        # raises if malformed
+        self.assertTrue(out.endswith("..."))
+
+    def test_ascii_reply_still_uses_the_character_limit(self):
+        out = lb.truncate_for_irc("x" * 5000)
+        self.assertLessEqual(len(out), lb.MAX_REPLY_LENGTH)
 
 
 if __name__ == "__main__":

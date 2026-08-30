@@ -54,6 +54,21 @@ pin the machine or stall the bot:
   bounded in characters as well as lines, because one user can pad a single
   line.
 - **The bot only reads and answers in the channel it joined.**
+- **Abuse is tracked against the hostmask, not the nickname.** The password
+  lockout used to be keyed on the nickname, which made it decorative: `/nick`
+  reset it, and 30 guesses in a row went through. Ignores follow the host too,
+  so they survive a rename.
+- **Password failures and blocked-output strikes are separate counters.**
+  Sharing one meant the model's own wording could lock a user out of
+  authenticating.
+- **A blocked reply is charged to the user who prompted it, never to the
+  recipient.** For a channel reply the recipient is the *channel*, so the old
+  behaviour could put `#yourchannel` on the ignore list and silence the bot
+  everywhere at once.
+- **Every per-user map is size-bounded.** Nicknames are free to invent, so
+  unbounded per-user state is memory a stranger can spend on your behalf.
+- **Replies are clamped in bytes as well as characters,** because the IRC line
+  limit is in bytes and accented text encodes longer than it looks.
 - **Capability isolation.** The request carries messages and limits only, never
   `tools`/`functions`, the endpoint is never derived from user input, and model
   output is only ever sent as chat text. The bot cannot fetch a URL, read a
@@ -132,11 +147,11 @@ _Nothing scheduled yet - planned work will be listed here._
 ### Security
 - Requires password-based authentication for private messaging.
 - User will be de-authenticated upon: nick change, channel part, disconnection.
-- Implements basic anti-brute-force measures with temporary blocking for failed login attempts.
+- Anti-brute-force blocking for failed logins, counted per hostmask so that changing nickname does not reset it.
 - Uses a local LLM setup by default to increase privacy.
 - Supports SSL/TLS connections, with certificate and hostname verification on by default.
 - Inputs/Outputs sanitized to avoid LLM generating and sending raw commands if prompted to do so.
-- Implements an ignore system for users attempting to trick the LLM into generating raw commands (ignore list resets when the program restarts).
+- Implements an ignore system for users attempting to trick the LLM into generating raw commands (ignore list resets when the program restarts). Ignores are keyed on the hostmask, and a channel can never be ignored.
 
 ![image](https://github.com/user-attachments/assets/f21ea601-8cc8-4a9f-8d90-7084c0271f87)
 
@@ -258,12 +273,17 @@ All tunable in `config.json`. The defaults are deliberately conservative:
 | `llm_connect_timeout_seconds` | `10` | Waiting for the endpoint to accept a connection |
 | `llm_timeout_seconds` | `60` | Waiting for a generation before giving up |
 | `llm_max_tokens` | `300` | Generated tokens - the most direct cap on model time |
-| `max_reply_length` | `400` | Characters put on the wire, to stay inside one IRC line |
+| `max_reply_length` | `400` | Characters put on the wire |
+| `max_reply_bytes` | `400` | UTF-8 bytes on the wire - the real IRC line limit |
 | `max_context_chars` | `2000` | Channel context assembled into a prompt |
 | `max_line_chars` | `300` | A single recorded channel line |
 | `reply_cooldown_seconds` | `10` | Seconds between generations for one hostmask |
 | `replies_per_minute` | `8` | Generations per rolling minute, everyone combined |
 | `max_concurrent_generations` | `1` | Generations in flight; extras are dropped |
+| `max_tracked_users` | `500` | Entries kept in each per-user map before the oldest are dropped |
+| `auth_failure_limit` | `3` | Wrong passwords from one host before a lockout |
+| `auth_block_seconds` | `900` | How long that lockout lasts |
+| `abuse_strike_limit` | `5` | Blocked replies charged to one host before it is ignored |
 
 Setting `llm_timeout_seconds` to a very large value re-creates the original
 problem, where a stuck endpoint takes the bot down with it.

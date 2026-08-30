@@ -39,6 +39,7 @@ import ssl
 import functools
 import subprocess
 import json
+import collections
 
 CONFIG_FILE = "config.json"
 
@@ -102,6 +103,25 @@ REPLIES_PER_MINUTE = int(config.get("replies_per_minute", 8))
 # than queued, so a burst cannot build a backlog.
 MAX_CONCURRENT_GENERATIONS = int(config.get("max_concurrent_generations", 1))
 
+# IRC lines are capped near 512 bytes including the protocol prefix, and that
+# limit is in BYTES. A reply of accented characters is longer encoded than it
+# looks, so clamp both.
+MAX_REPLY_BYTES = int(config.get("max_reply_bytes", 400))
+
+# Upper bound on how many users the bot remembers anything about. Every
+# per-user map is bounded by this: nicknames are unlimited and free to create,
+# so unbounded per-user state is memory a stranger can spend for you.
+MAX_TRACKED_USERS = int(config.get("max_tracked_users", 500))
+
+# Failed password attempts before a lockout, and how long it lasts.
+AUTH_FAILURE_LIMIT = int(config.get("auth_failure_limit", 3))
+AUTH_BLOCK_SECONDS = float(config.get("auth_block_seconds", 900))
+
+# Blocked-output strikes before a user is ignored for the session. Tracked
+# separately from password failures: they are different behaviours and must not
+# share a budget.
+ABUSE_STRIKE_LIMIT = int(config.get("abuse_strike_limit", 5))
+
 # Conventional port for IRC over TLS; used to auto-enable SSL in the UI.
 SSL_PORT = "6697"
 
@@ -143,12 +163,64 @@ def append_to_user_log(logging_enabled, nickname, summary):
         f.write(f"[{datetime.now()}]\n{summary}\n\n")
 
 
+class BoundedDict(collections.OrderedDict):
+    """Mapping that forgets its least recently used entries past a maximum.
+
+    Every per-user map used to grow without limit, so a stranger cycling
+    nicknames could make the bot consume memory indefinitely.
+    """
+
+    def __init__(self, max_entries=MAX_TRACKED_USERS):
+        self.max_entries = max(1, max_entries)
+        super().__init__()
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self.move_to_end(key)
+        while len(self) > self.max_entries:
+            self.popitem(last=False)
+
+
+class BoundedSet:
+    """Set that discards its oldest members past a maximum."""
+
+    def __init__(self, max_entries=MAX_TRACKED_USERS):
+        self.max_entries = max(1, max_entries)
+        self._items = collections.OrderedDict()
+
+    def add(self, item):
+        self._items[item] = True
+        self._items.move_to_end(item)
+        while len(self._items) > self.max_entries:
+            self._items.popitem(last=False)
+
+    def discard(self, item):
+        self._items.pop(item, None)
+
+    def __contains__(self, item):
+        return item in self._items
+
+    def __len__(self):
+        return len(self._items)
+
+    def __iter__(self):
+        return iter(self._items)
+
+
+def truncate_text(text, max_chars=0, max_bytes=0):
+    """Clamp text by characters and/or by UTF-8 bytes, never mid-character."""
+    if max_chars > 0 and len(text) > max_chars:
+        text = text[: max(0, max_chars - 3)].rstrip() + "..."
+    if max_bytes > 0 and len(text.encode("utf-8")) > max_bytes:
+        clipped = text.encode("utf-8")[: max(0, max_bytes - 3)]
+        text = clipped.decode("utf-8", errors="ignore").rstrip() + "..."
+    return text
+
+
 def truncate_for_irc(text, limit=None):
     """Clamp a reply to something that fits comfortably in one IRC line."""
     limit = MAX_REPLY_LENGTH if limit is None else limit
-    if limit <= 0 or len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
+    return truncate_text(text, max_chars=limit, max_bytes=MAX_REPLY_BYTES)
 
 
 class RateLimiter:
@@ -170,6 +242,12 @@ class RateLimiter:
         now = time.time() if now is None else now
         with self.lock:
             self.recent = [t for t in self.recent if now - t < 60]
+            # last_seen is keyed by identity, so prune it too: an entry older
+            # than the cooldown can never deny anything.
+            if len(self.last_seen) > MAX_TRACKED_USERS:
+                stale = [k for k, t in self.last_seen.items() if now - t > self.cooldown]
+                for key in stale:
+                    del self.last_seen[key]
             if self.per_minute > 0 and len(self.recent) >= self.per_minute:
                 return False, "global limit reached"
 
@@ -391,13 +469,23 @@ class IRCBot:
         self.password_hash = hash_password(password)
         self.log_callback = log_callback
         self.logging_enabled = logging_var
-        self.authenticated_users = {}
-        self.failed_attempts = {}
-        self.last_attempt_time = {}
+        self.authenticated_users = BoundedDict()
+        # Password failures, keyed by HOST. Keeping this per-nickname made the
+        # lockout meaningless: /nick is free, so an attacker reset it at will.
+        self.failed_attempts = BoundedDict()
+        self.last_attempt_time = BoundedDict()
+        # Blocked-output strikes, also keyed by host. Deliberately separate
+        # from failed_attempts: tripping the output filter and guessing the
+        # password are different behaviours, and sharing one counter let one
+        # lock a user out of the other.
+        self.abuse_strikes = BoundedDict()
+        # Last known host for each nickname, so a nickname seen in a reply can
+        # be resolved back to the identity that abuse is tracked against.
+        self.nick_hosts = BoundedDict()
         self.client = irc.client.Reactor()
         self.connection = None
         self.keep_alive_interval = 60
-        self.logged_messages = set()
+        self.logged_messages = BoundedSet(2000)
         self.exclude_keywords = [
             "end of names list",
             "+i",
@@ -426,9 +514,11 @@ class IRCBot:
             "376",
         ]
         self.conversation_history = []
-        self.ignore_list = set()
-        self.user_conversations = {}
-        self.user_message_buffer = {}
+        # Ignored identities (hosts), never channels: ignoring a channel would
+        # silence the bot everywhere at once.
+        self.ignore_list = BoundedSet()
+        self.user_conversations = BoundedDict()
+        self.user_message_buffer = BoundedDict()
         # Plain-text transcript of recent channel activity, kept as a list of
         # "nick: message" strings. Stored as text (not chat-role messages) so
         # it can be embedded into a single user prompt, which is compatible
@@ -456,6 +546,36 @@ class IRCBot:
         """
         mask = irc.client.NickMask(event.source)
         return (getattr(mask, "host", None) or mask.nick or "unknown").lower()
+
+    def remember_identity(self, event):
+        """Record nickname -> host for any event that carries a hostmask."""
+        try:
+            mask = irc.client.NickMask(event.source)
+        except Exception:
+            return
+        host = getattr(mask, "host", None)
+        if host and mask.nick:
+            self.nick_hosts[mask.nick.lower()] = host.lower()
+
+    def identity_for_nick(self, nick):
+        """Best known identity for a nickname, falling back to the nickname.
+
+        The fallback is weak on purpose: it is better to rate-limit something
+        than nothing, and every path that matters passes a real hostmask.
+        """
+        if not nick:
+            return "unknown"
+        return self.nick_hosts.get(nick.lower(), nick.lower())
+
+    def is_ignored(self, nick):
+        """True when the identity behind a nickname is on the ignore list."""
+        if self.is_channel(nick):
+            return False
+        return self.identity_for_nick(nick) in self.ignore_list
+
+    @staticmethod
+    def is_channel(target):
+        return bool(target) and target.startswith(("#", "&", "+", "!"))
 
     def allow_generation(self, event, source):
         """Rate-limit gate. Logs and returns False when the request is denied."""
@@ -627,7 +747,7 @@ class IRCBot:
                         {"role": "assistant", "content": response}
                     )
 
-                    self.send_message(source, response)
+                    self.send_message(source, response, offender=source)
 
                 self.dispatch_generation(f"ACTION reply to {source}", generate)
             else:
@@ -667,6 +787,7 @@ class IRCBot:
 
     def handle_server_message(self, connection, event):
         event_type = event.type.lower()
+        self.remember_identity(event)
 
         if event_type == "privmsg":
             self.on_private_message(connection, event)
@@ -771,7 +892,7 @@ class IRCBot:
         source = irc.client.NickMask(event.source).nick
         message = event.arguments[0]
 
-        if source in self.ignore_list:
+        if self.is_ignored(source):
             self.log_callback(
                 "_____________________________________________________ ____ __ _ _"
             )
@@ -826,7 +947,7 @@ class IRCBot:
                     {"role": "assistant", "content": response}
                 )
 
-                self.send_message(source, response)
+                self.send_message(source, response, offender=source)
 
                 if self.logging_enabled and len(self.user_message_buffer[source]) >= 3:
                     self.log_callback(
@@ -909,7 +1030,7 @@ class IRCBot:
             return
 
         # Never store or reply to ignored users.
-        if source in self.ignore_list:
+        if self.is_ignored(source):
             return
 
         # Passively read every channel message into the transcript for
@@ -983,8 +1104,9 @@ class IRCBot:
             self.record_channel_line(f"{source}: {message}")
             self.record_channel_line(f"{self.nickname}: {response}")
 
-            # Address the user who mentioned the bot at the start of the reply.
-            self.send_message(self.channel, f"{source}: {response}")
+            # Address the user who mentioned the bot at the start of the
+            # reply. The offender is the mentioning user, not the channel.
+            self.send_message(self.channel, f"{source}: {response}", offender=source)
 
         self.dispatch_generation(f"channel reply to {source}", generate)
 
@@ -1011,19 +1133,23 @@ class IRCBot:
             del self.user_conversations[nickname]
 
     def check_password(self, nickname, password):
+        # Lockout is tracked against the hostmask, not the nickname: /nick
+        # costs nothing, so a nickname-keyed counter is not a lockout at all.
+        identity = self.identity_for_nick(nickname)
         current_time = time.time()
 
-        if nickname in self.failed_attempts:
-            if self.failed_attempts[nickname] >= 3:
-                if current_time - self.last_attempt_time[nickname] < 900:
+        if identity in self.failed_attempts:
+            if self.failed_attempts[identity] >= AUTH_FAILURE_LIMIT:
+                if current_time - self.last_attempt_time[identity] < AUTH_BLOCK_SECONDS:
                     if self.log_callback:
                         self.log_callback(
-                            f"BOT - User {nickname} blocked for 15 minutes.",
+                            f"BOT - User {nickname} blocked for "
+                            f"{AUTH_BLOCK_SECONDS / 60:.0f} minutes.",
                             bold=True,
                         )
                     return
                 else:
-                    self.failed_attempts[nickname] = 0
+                    self.failed_attempts[identity] = 0
 
         if hash_password(password) == self.password_hash:
             if not self.authenticated_users.get(nickname, False):
@@ -1038,66 +1164,35 @@ class IRCBot:
 
                 self.user_conversations[nickname] = []
         else:
-            self.failed_attempts[nickname] = self.failed_attempts.get(nickname, 0) + 1
-            self.last_attempt_time[nickname] = current_time
+            self.failed_attempts[identity] = self.failed_attempts.get(identity, 0) + 1
+            self.last_attempt_time[identity] = current_time
             if self.log_callback:
                 self.log_callback(
                     f"BOT - Failed authentication ({nickname})", bold=True
                 )
             self.send_message(nickname, "Nah, you don't...")
 
-    def send_message(self, target, message):
+    def send_message(self, target, message, offender=None):
+        """Send one line to a nickname or channel.
+
+        offender is the nickname whose input produced this text, if any. A
+        blocked reply is charged to them, never to `target`: for a channel
+        reply `target` is the channel itself, so the old behaviour could put
+        the whole channel on the ignore list and silence the bot everywhere.
+        """
         if not self.connection:
             if self.log_callback:
                 self.log_callback("BOT - Not connected.", bold=True)
             return
 
-        if target in self.ignore_list:
+        if self.is_ignored(target):
             if self.log_callback:
                 self.log_callback(f"BOT - Ignored {target}.", bold=True)
             return
 
         sanitized_message = truncate_for_irc(self.sanitize_input(message))
         if self.contains_irc_commands(sanitized_message):
-            if self.log_callback:
-                self.log_callback(
-                    "_____________________________________________________ ____ __ _ _"
-                )
-                self.log_callback(
-                    f"BOT - AI sending RAW command '{sanitized_message}'. Blocked!",
-                    bold=True,
-                )
-                self.log_callback(
-                    f"BOT - User {target} is trying to mess around with prompts...'.",
-                    bold=True,
-                )
-                self.log_callback(
-                    "_____________________________________________________ ____ __ _ _"
-                )
-
-            self.failed_attempts[target] = self.failed_attempts.get(target, 0) + 1
-
-            if self.failed_attempts[target] >= 5:
-                self.ignore_list.add(target)
-                if self.log_callback:
-                    self.log_callback(
-                        f"BOT - {target} added to ignore list after 5 warnings.",
-                        bold=True,
-                    )
-                self.send_message(
-                    target,
-                    "You have been ignored for this session due to multiple warnings.",
-                )
-                return
-
-            # Warning messages for potential abuse
-            self.send_message(
-                target, "Warning: Your message may trigger unsafe actions."
-            )
-            time.sleep(3)
-            self.send_message(target, "Please avoid sending suspicious commands.")
-            time.sleep(3)
-            self.send_message(target, "Repeated abuse will result in being ignored.")
+            self.handle_blocked_output(target, sanitized_message, offender)
             return
 
         try:
@@ -1114,6 +1209,65 @@ class IRCBot:
                 self.log_callback(
                     f"BOT - Error sending message to {target}: {e}", bold=True
                 )
+
+    def handle_blocked_output(self, target, sanitized_message, offender):
+        """Record and report a reply that the output filter refused to send."""
+        if self.log_callback:
+            self.log_callback(
+                "_____________________________________________________ ____ __ _ _"
+            )
+            self.log_callback(
+                f"BOT - AI sending RAW command '{sanitized_message}'. Blocked!",
+                bold=True,
+            )
+
+        # With no attributable user, or when the "offender" is a channel, log
+        # and stop. Charging a strike to whoever happened to receive the reply
+        # punished the wrong person for what the model said.
+        if not offender or self.is_channel(offender):
+            if self.log_callback:
+                self.log_callback(
+                    "BOT - Blocked output not attributed to any user.", bold=True
+                )
+            return
+
+        identity = self.identity_for_nick(offender)
+        self.abuse_strikes[identity] = self.abuse_strikes.get(identity, 0) + 1
+        strikes = self.abuse_strikes[identity]
+
+        if self.log_callback:
+            self.log_callback(
+                f"BOT - Strike {strikes}/{ABUSE_STRIKE_LIMIT} for {offender} "
+                "(prompt likely crafted to make the bot emit a command).",
+                bold=True,
+            )
+
+        if strikes >= ABUSE_STRIKE_LIMIT:
+            self.ignore_list.add(identity)
+            if self.log_callback:
+                self.log_callback(
+                    f"BOT - {offender} ignored for this session after "
+                    f"{ABUSE_STRIKE_LIMIT} strikes.",
+                    bold=True,
+                )
+            self.notify(offender, "You have been ignored for this session.")
+            return
+
+        self.notify(offender, "Warning: your message may trigger unsafe actions.")
+
+    def notify(self, nickname, text):
+        """Send bot-authored text, bypassing the output filter and strikes.
+
+        These lines are written here, not generated, so running them back
+        through the filter risks a warning about a warning.
+        """
+        if not self.connection or self.is_ignored(nickname):
+            return
+        try:
+            self.connection.privmsg(nickname, truncate_for_irc(text))
+        except Exception as e:
+            if self.log_callback:
+                self.log_callback(f"BOT - Error notifying {nickname}: {e}", bold=True)
 
     def contains_irc_commands(self, message):
         irc_commands = [
