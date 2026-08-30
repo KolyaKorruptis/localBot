@@ -351,11 +351,30 @@ Make sure your local LLM is up and running, then:
 
 ## Locking Down the LLM Endpoint
 
-MCP servers, document retrieval and URL fetching are features of the **LM Studio
-application**, not of the `/v1/chat/completions` endpoint the bot talks to. Tool
-use over that API is driven by the client: the caller sends a `tools` array, the
-model may answer with `tool_calls`, and **the caller executes them**. The server
-does not act on its own.
+In the OpenAI protocol, tool use is driven by the client: the caller sends a
+`tools` array, the model may answer with `tool_calls`, and **the caller executes
+them**. localBot sends no tools and executes nothing, so on that protocol alone
+it cannot be talked into fetching a URL or reading a file.
+
+**LM Studio goes further than the protocol, so do not rely on that alone.** Its
+server can run MCP tools itself, governed by two permissions:
+
+| Permission | UI toggle | Effect when allowed |
+| --- | --- | --- |
+| `dynamicRemoteMcpServer` | *Allow Remote MCP* | An API client may name remote MCP servers **per request**; LM Studio connects and runs them for the duration of that request |
+| `pluginUse` | *Allow calling servers from mcp.json* | An API client may invoke the MCP servers configured in `mcp.json` |
+
+Both default to `deny`, and LM Studio forces `pluginUse` back to `deny` unless
+token authentication is set to *required*. Check them - the state lives in
+`.lmstudio/.internal/permissions-store.json`, at server level and again per
+token:
+
+```json
+"serverPermissions": { "dynamicRemoteMcpServer": "deny", "pluginUse": "deny" }
+```
+
+Keep both on `deny` unless you have a specific reason not to. Per-token
+permissions are the tighter control: a token may deny what the server allows.
 
 localBot never sends `tools`, never executes anything, and reads only the reply
 text, so it cannot be talked into fetching a URL or reading a file. But that is a
@@ -367,7 +386,14 @@ on that machine:
   without egress, whatever the configuration says. The bot connects *inbound* to
   LM Studio, so blocking outbound traffic does not affect it.
 - **Check LM Studio's MCP configuration** (`mcp.json`, editable from inside the
-  app) and remove any servers you did not add deliberately.
+  app) and remove any servers you did not add deliberately. `mcp.json` alone is
+  not the whole story: confirm the two server permissions above are `deny`.
+- **Turn off *Redact Content* logging.** LM Studio writes prompts and responses
+  to `server-logs/` by default (`logSensitiveData`), which for this bot means
+  every channel message and private conversation lands on disk in plaintext.
+  The toggle is on the Developer page behind the **"..." (More options)** button
+  next to the server log panel, not in the main settings list, and it is
+  inverted: switching *Redact Content* **on** sets `logSensitiveData` to false.
 - **Keep the server on loopback.** Leave "serve on local network" off so nothing
   but the bot can reach it.
 - **Set an API key** (see `llm_api_key`) so that even on loopback, only the bot
