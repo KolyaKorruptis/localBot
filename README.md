@@ -25,6 +25,16 @@ merged are not listed here.
 - **Ignored users are neither answered nor recorded** in the transcript, and the
   bot never reacts to its own messages.
 
+### Connection
+- **SSL/TLS connections.** An **SSL** checkbox next to the port field encrypts
+  the connection. It ticks itself when the port is `6697`, the conventional
+  IRC-over-TLS port, and unticks if the port changes back - though clicking it
+  yourself stops it following the port, so an explicit choice is never
+  overwritten.
+- **Certificates are verified** against the server hostname by default, with
+  SNI. Servers using a self-signed certificate can be reached by setting
+  `ssl_allow_self_signed` in `config.json` (see Configuration).
+
 ### LLM Handling
 - **Works with strict-role models.** Channel context is placed in the system
   prompt instead of the user turn, producing a valid alternating system/user
@@ -89,7 +99,7 @@ _Nothing scheduled yet - planned work will be listed here._
 - User will be de-authenticated upon: nick change, channel part, disconnection.
 - Implements basic anti-brute-force measures with temporary blocking for failed login attempts.
 - Uses a local LLM setup by default to increase privacy.
-- Secure connection is supported by Python IRC libraries.
+- Supports SSL/TLS connections, with certificate and hostname verification on by default.
 - Inputs/Outputs sanitized to avoid LLM generating and sending raw commands if prompted to do so.
 - Implements an ignore system for users attempting to trick the LLM into generating raw commands (ignore list resets when the program restarts).
 
@@ -129,14 +139,24 @@ Ensure the following libraries are installed and/or available:
 - `json`
 - `datetime`
 - `hashlib`
-- `irc` (irc.client)
+- `irc` (irc.client) - **version 9.0 or newer**
+- `ssl`, `functools` (standard library, used for TLS connections)
 
 If you plan to change the code to use external APIs, consider importing `openai`. Please refer to OpenAI documentation for API access, and code comments for instructions.
 
 Install missing dependencies using (example):
 ```bash
-pip install requests
+pip install requests irc
 ```
+
+> **Note on the `irc` package:** localBot needs `irc.client.Reactor`, which
+> exists only in `irc` 9.0 and newer. Distribution packages can be much older -
+> Ubuntu 24.04's `python3-irc` is 8.5.3 and will fail with
+> `AttributeError: module 'irc.client' has no attribute 'Reactor'`. Install a
+> current version from PyPI instead. `tkinter` is the exception: it is not on
+> PyPI, so install it from your distribution (`sudo apt install python3-tk` on
+> Debian/Ubuntu). If you use a virtual environment, create it with
+> `--system-site-packages` so it can see `tkinter`.
 
 ---
 
@@ -164,7 +184,8 @@ pip install requests
 ### Connection Parameters
 In the graphical interface, fill in the following fields:
 - **Server:** IRC server address (e.g., `open.ircnet.net`).
-- **Port:** IRC server port (default: `6667`).
+- **Port:** IRC server port (default: `6667`; use `6697` for SSL).
+- **SSL:** Encrypt the connection with TLS. Ticks itself when the port is `6697`; tick or untick it by hand to override, and it will then stop following the port.
 - **Nickname:** Bot's IRC nickname (e.g., `Egidio`).
 - **Channel:** IRC channel to join (e.g., `#example`).
 - **Password:** Password required for private messaging authentication. Connection will not be possible if no password is set.
@@ -173,6 +194,23 @@ In the graphical interface, fill in the following fields:
 
 ### Customizing Configuration
 Options like the system prompt, summary prompt, logging directory, LLM endpoint, and other defaults are now managed via the `config.json` file. Modify `config.json` to update these values without changing the code.
+
+#### `ssl_allow_self_signed`
+Off (`false`) by default. When SSL is enabled, localBot verifies the server's
+certificate chain and checks it matches the hostname you connected to. Some
+smaller IRC networks use self-signed certificates, which are rejected by that
+check. Setting this to `true` lets the bot connect to them anyway:
+
+```json
+"ssl_allow_self_signed": true
+```
+
+> **This disables certificate verification entirely - both the chain and the
+> hostname check - not just for self-signed certificates.** The connection is
+> still encrypted, but it no longer proves who is on the other end, so it can be
+> intercepted by anyone able to redirect your traffic. Only enable it for a
+> server whose certificate you already trust. localBot logs a warning in the
+> console whenever it connects with verification disabled.
 
 ---
 
@@ -236,6 +274,9 @@ Some features are not supported to avoid complexity, or for security reasons:
    - Check your internet connection.
    - Check your firewall and/or VPN.
    - Using TOR? Enter a .onion server; regular servers may have you banned.
+   - Connecting with **SSL** to a plaintext port (or the reverse) will fail: use `6697` for SSL, `6667` without it.
+   - `certificate verify failed`? The server's certificate is self-signed or does not match its hostname. See `ssl_allow_self_signed` under Configuration, and read the warning there before enabling it.
+   - `AttributeError: ... no attribute 'Reactor'`? Your `irc` package is older than 9.0. See the note under Requirements.
 
 2. **Authentication Fails:**
    - Verify the correct password is entered.

@@ -4,6 +4,7 @@
     "help_text_file": "help_text.txt",
     "log_dir": "user_logs",
     "llm_endpoint": "http://localhost:1234/v1/chat/completions",
+    "ssl_allow_self_signed": false,
     "default_nickname": "Egidio",
     "default_server": "ssl.ircnet.ovh",
     "default_port": "6667",

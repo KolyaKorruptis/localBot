@@ -32,8 +32,11 @@ from datetime import datetime
 import time
 import hashlib
 import irc.client
+import irc.connection
 import os
 import re
+import ssl
+import functools
 import subprocess
 import json
 
@@ -55,6 +58,16 @@ SUMMARY_PROMPT_FILE = config["summary_prompt_file"]
 HELP_TEXT_FILE = config["help_text_file"]
 LOG_DIR = config["log_dir"]
 LLM_ENDPOINT = config["llm_endpoint"]
+
+# Conventional port for IRC over TLS; used to auto-enable SSL in the UI.
+SSL_PORT = "6697"
+
+# Accept SSL certificates that would normally be rejected, so the bot can reach
+# servers using a self-signed certificate. This turns off BOTH chain and
+# hostname verification, which means the connection is encrypted but no longer
+# proves who is on the other end, so it can be intercepted. Off by default;
+# only enable it for a server whose certificate you already trust.
+SSL_ALLOW_SELF_SIGNED = bool(config.get("ssl_allow_self_signed", False))
 nck = config["default_nickname"]
 srv = config["default_server"]
 prt = config["default_port"]
@@ -228,9 +241,13 @@ class IRCBot:
         password,
         log_callback=None,
         logging_var=True,
+        use_ssl=False,
+        allow_self_signed=SSL_ALLOW_SELF_SIGNED,
     ):
         self.server = server
         self.port = port
+        self.use_ssl = use_ssl
+        self.allow_self_signed = allow_self_signed
         self.nickname = nickname
         self.channel = channel
         self.password_hash = hash_password(password)
@@ -282,6 +299,36 @@ class IRCBot:
         self.channel_transcript = []
         self.channel_history_limit = 50
 
+    def build_connect_factory(self):
+        """Build the socket factory used for the IRC connection.
+
+        For SSL we cannot use the ``ssl.wrap_socket`` recipe from the irc
+        library's own documentation: that function was removed in Python 3.12.
+        Instead wrap through an SSLContext, passing server_hostname so that SNI
+        works and the certificate is checked against the host we asked for.
+        create_default_context() verifies the certificate chain and hostname,
+        unless allow_self_signed is set (see SSL_ALLOW_SELF_SIGNED).
+        """
+        if not self.use_ssl:
+            return irc.connection.Factory()
+
+        context = ssl.create_default_context()
+        if self.allow_self_signed:
+            # check_hostname must be cleared before CERT_NONE, otherwise
+            # ssl raises "Cannot set verify_mode to CERT_NONE when
+            # check_hostname is enabled".
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            if self.log_callback:
+                self.log_callback(
+                    "BOT - WARNING: SSL certificate verification is disabled "
+                    "(ssl_allow_self_signed). The connection is encrypted but "
+                    "not authenticated, so it can be intercepted.",
+                    bold=True,
+                )
+        wrapper = functools.partial(context.wrap_socket, server_hostname=self.server)
+        return irc.connection.Factory(wrapper=wrapper)
+
     def connect(self):
         if self.log_callback:
             self.log_callback(
@@ -294,12 +341,16 @@ class IRCBot:
                 "_____________________________________________________ ____ __ _ _"
             )
             self.log_callback(
-                f"BOT - Connecting to IRC ({self.server} port {self.port})...",
+                f"BOT - Connecting to IRC ({self.server} port {self.port}"
+                f"{', SSL' if self.use_ssl else ''})...",
                 bold=True,
             )
         try:
             self.connection = self.client.server().connect(
-                self.server, int(self.port), self.nickname
+                self.server,
+                int(self.port),
+                self.nickname,
+                connect_factory=self.build_connect_factory(),
             )
             self.connection.add_global_handler("all_events", self.handle_server_message)
             self.connection.add_global_handler("ctcp", self.handle_ctcp_message)
@@ -917,8 +968,14 @@ class App(tk.Tk):
         self.msg_var = tk.StringVar()
         self.autojoin_var = tk.BooleanVar(value=True)
         self.logging_var = tk.BooleanVar(value=False)
+        self.ssl_var = tk.BooleanVar(value=str(prt) == SSL_PORT)
+        # While True, the SSL checkbox follows the port field. Ticking or
+        # unticking the box by hand turns this off, so an explicit choice is
+        # never overwritten by a later edit to the port.
+        self.ssl_follows_port = True
         self.bot = None
         self.logging_var.trace_add("write", self.handle_logging_change)
+        self.port_var.trace_add("write", self.handle_port_change)
 
         self.create_widgets()
         self.create_menu()
@@ -955,6 +1012,12 @@ class App(tk.Tk):
         ttk.Entry(param_frame, textvariable=self.port_var).grid(
             row=1, column=1, sticky="we"
         )
+        ttk.Checkbutton(
+            param_frame,
+            text="SSL",
+            variable=self.ssl_var,
+            command=self.handle_ssl_toggle,
+        ).grid(row=1, column=2, sticky="w")
         ttk.Label(param_frame, text="Nick:").grid(row=2, column=0, sticky="e")
         ttk.Entry(param_frame, textvariable=self.nick_var).grid(
             row=2, column=1, sticky="we"
@@ -1018,6 +1081,18 @@ class App(tk.Tk):
         self.log_text.tag_configure("bold", font=("Monospace", 10, "bold"))
         self.log_text.pack(fill="both", expand=True)
 
+    def handle_port_change(self, *args):
+        # Tick SSL automatically for the conventional TLS port, and untick it
+        # again if the port is changed back, unless the user set the box by
+        # hand.
+        if not self.ssl_follows_port:
+            return
+        self.ssl_var.set(self.port_var.get().strip() == SSL_PORT)
+
+    def handle_ssl_toggle(self):
+        # Only fires on a real click, not on programmatic .set() calls.
+        self.ssl_follows_port = False
+
     def connect_bot(self):
         server = self.server_var.get()
         port = self.port_var.get()
@@ -1043,6 +1118,7 @@ class App(tk.Tk):
             password,
             log_callback=self.log_message,
             logging_var=self.logging_var.get(),
+            use_ssl=self.ssl_var.get(),
         )
 
         self.bot.client.add_global_handler("endofmotd", self.handle_end_of_motd)
