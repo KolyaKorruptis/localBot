@@ -425,8 +425,32 @@ def ask_LLM(
             return None, None
         response.raise_for_status()
         result = response.json()
-        assistant_message = result["choices"][0]["message"]
-        return assistant_message["content"], assistant_message["role"]
+        choice = result["choices"][0]
+        assistant_message = choice["message"]
+
+        # TRIPWIRE - see tests/test_security.py.
+        # This client never sends "tools", so a well-behaved OpenAI-compatible
+        # server has nothing to call and cannot return a tool call. If one comes
+        # back, the endpoint has gained capabilities of its own: an MCP server,
+        # a retrieval plugin, a URL fetcher. Nothing is executed here either way
+        # (only "content" is ever read), but refuse the reply and say so, rather
+        # than returning an empty message that looks like an ordinary failure.
+        if (
+            assistant_message.get("tool_calls")
+            or assistant_message.get("function_call")
+            or choice.get("finish_reason") in ("tool_calls", "function_call")
+        ):
+            if log_callback:
+                log_callback(
+                    "LLM - REFUSED: the endpoint returned a tool call, but this "
+                    "client never requests tools. Check LM Studio for an MCP "
+                    "server, document retrieval or URL fetching. Nothing was "
+                    "executed.",
+                    bold=True,
+                )
+            return None, None
+
+        return assistant_message.get("content"), assistant_message.get("role")
     except requests.exceptions.Timeout:
         # Distinct from a generic error: the endpoint accepted the request and
         # then took too long, which is what a resource-exhaustion attempt looks

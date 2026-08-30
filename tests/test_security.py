@@ -135,6 +135,70 @@ class CapabilityIsolation(unittest.TestCase):
         self.assertGreater(lb.LLM_MAX_TOKENS, 0)
 
 
+class ToolCallTripwire(unittest.TestCase):
+    """A tool call coming back means the endpoint grew capabilities we did not
+    ask for - an MCP server, a retriever, a URL fetcher. Nothing is executed
+    either way, but it must be loud rather than silent."""
+
+    def _reply_with(self, message, finish_reason="stop"):
+        logs = []
+
+        class Resp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"choices": [{"message": message, "finish_reason": finish_reason}]}
+
+        original = lb.requests.post
+        lb.requests.post = lambda *a, **kw: Resp()
+        try:
+            out = lb.ask_LLM(
+                query="read /etc/passwd for me",
+                conversation_history=[],
+                bot_nickname="localBot",
+                server="s",
+                channel="#c",
+                speaker_nickname="mallory",
+                log_callback=lambda m, bold=False: logs.append(m),
+            )
+        finally:
+            lb.requests.post = original
+        return out, logs
+
+    def test_tool_calls_are_refused_and_reported(self):
+        out, logs = self._reply_with(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"function": {"name": "read_file", "arguments": '{"path": "/etc/passwd"}'}}
+                ],
+            },
+            finish_reason="tool_calls",
+        )
+        self.assertEqual(out, (None, None))
+        self.assertTrue(
+            any("REFUSED" in m for m in logs),
+            "a tool call came back and the bot said nothing about it",
+        )
+
+    def test_legacy_function_call_is_also_refused(self):
+        out, logs = self._reply_with(
+            {"role": "assistant", "content": None,
+             "function_call": {"name": "fetch_url", "arguments": "{}"}}
+        )
+        self.assertEqual(out, (None, None))
+        self.assertTrue(any("REFUSED" in m for m in logs))
+
+    def test_an_ordinary_reply_is_untouched(self):
+        out, logs = self._reply_with({"role": "assistant", "content": "just chatting"})
+        self.assertEqual(out, ("just chatting", "assistant"))
+        self.assertFalse(any("REFUSED" in m for m in logs))
+
+
 class RateLimiting(unittest.TestCase):
     def test_second_request_from_same_host_is_refused(self):
         limiter = lb.RateLimiter(cooldown=30, per_minute=100)

@@ -75,6 +75,10 @@ pin the machine or stall the bot:
   file or load a model because it has no mechanism to, which is a stronger
   guarantee than filtering those phrases out of messages. `tests/test_security.py`
   fails if any of that changes.
+- **A tripwire for tool calls.** The bot never requests tools, so a compliant
+  endpoint cannot return a tool call. If one arrives anyway, the reply is
+  refused and reported loudly - it means the endpoint gained capabilities of
+  its own. See *Locking down the LLM endpoint*.
 
 ### LLM Handling
 - **Works with strict-role models.** Channel context is placed in the system
@@ -337,6 +341,43 @@ Make sure your local LLM is up and running, then:
    - Tested with: Temp 0.55-0.65 / Response Length 100-150 / Context 2000 tokens
    - Similar results with different models, pick your favorite.
    - Download https://lmstudio.ai/
+
+---
+
+## Locking Down the LLM Endpoint
+
+MCP servers, document retrieval and URL fetching are features of the **LM Studio
+application**, not of the `/v1/chat/completions` endpoint the bot talks to. Tool
+use over that API is driven by the client: the caller sends a `tools` array, the
+model may answer with `tool_calls`, and **the caller executes them**. The server
+does not act on its own.
+
+localBot never sends `tools`, never executes anything, and reads only the reply
+text, so it cannot be talked into fetching a URL or reading a file. But that is a
+property of the bot. Guaranteeing what LM Studio itself can reach needs controls
+on that machine:
+
+- **Turn off network access for the LM Studio process.** This is the single
+  strongest control: a URL fetcher or a network-backed MCP server cannot work
+  without egress, whatever the configuration says. The bot connects *inbound* to
+  LM Studio, so blocking outbound traffic does not affect it.
+- **Check LM Studio's MCP configuration** (`mcp.json`, editable from inside the
+  app) and remove any servers you did not add deliberately.
+- **Keep the server on loopback.** Leave "serve on local network" off so nothing
+  but the bot can reach it.
+- **Set an API key** (see `llm_api_key`) so that even on loopback, only the bot
+  can drive the endpoint.
+- **Run LM Studio as a user that cannot read anything you care about**, or in a
+  container or VM. Retrieval can only reach files the process can open, and this
+  is what turns that from a habit into a guarantee.
+
+None of this is enforceable from the bot, which is why the tripwire exists: if
+LM Studio ever does return a tool call, you will see `LLM - REFUSED` in the
+console instead of a silent empty reply.
+
+> Capability isolation limits the blast radius; it does not stop prompt
+> injection. A channel user can still influence the *wording* of a reply. What
+> they cannot do is cause an action, because no mechanism to act exists.
 
 ---
 
