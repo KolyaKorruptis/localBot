@@ -452,6 +452,32 @@ console instead of a silent empty reply.
 
 ---
 
+## Running the Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+`tests/test_security.py` holds 55 tests covering the guarantees that are easy to
+break without noticing:
+
+| Area | What it pins down |
+| --- | --- |
+| Capability isolation | No `tools`/`functions` in the payload, an endpoint never derived from user input, a timeout always present |
+| Tool-call tripwire | A returned tool call is refused and reported, while the empty `tool_calls: []` a real server sends on every reply is not mistaken for one |
+| Untrusted framing | Channel text is fenced with a per-request nonce, a forged closing marker stays inside the fence, and the operator's words come last |
+| Self-contamination | The bot's own replies never re-enter its channel context |
+| Rate limiting | Cooldowns and the global ceiling key on the hostmask, so changing nickname does not reset them |
+| Concurrency | Excess generations are dropped rather than queued, and a failed one releases its slot |
+| Bounds | Reply length in characters and UTF-8 bytes, prompt size, and a cap on every per-user map |
+| Prompt loading | A missing or blank `system_prompt.txt` stops the bot instead of running it untuned |
+
+Run it after touching anything in the message-handling path. Several of these
+exist because the behaviour they describe was measured against a live model and
+turned out to differ from what seemed obvious.
+
+---
+
 ## License
 
 localBot is free software, licensed under the **GNU General Public License,
