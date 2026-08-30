@@ -1102,7 +1102,14 @@ class IRCBot:
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 =^❤òàèéùçìÈ€%$£'.,;:!?()-_+@*äöüßÄÖÜâêîôûÂÊÎÔÛëïËÏÉÀÙ"
             "øåæØÅÆčćđšžČĆĐŠŽāēīūģķļņĀĒĪŪĢĶĻŅąęłńśźżĄĘŁŃŚŹŻñÑ"
         )
-        sanitized = "".join(ch for ch in text if ch in allowed_characters).strip()
+        # Collapse whitespace to single spaces BEFORE filtering. Newlines and
+        # tabs are not in the allowlist, and dropping them outright welded
+        # words together: a two-line reply arrived as
+        # "Sure thing.What else do you need?".
+        normalised = " ".join(str(text).split())
+        sanitized = "".join(
+            ch for ch in normalised if ch in allowed_characters
+        ).strip()
         return sanitized
 
     def request_authentication(self, nickname):

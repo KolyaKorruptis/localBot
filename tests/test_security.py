@@ -316,6 +316,17 @@ class InputAndOutputBounds(unittest.TestCase):
             bot.record_channel_line(f"user{i}: " + "B" * lb.MAX_LINE_CHARS)
         self.assertLessEqual(len(bot.build_channel_context()), lb.MAX_CONTEXT_CHARS)
 
+    def test_whitespace_becomes_a_space_rather_than_vanishing(self):
+        """Stripping newlines outright welded words together."""
+        bot = make_bot()
+        self.assertEqual(
+            bot.sanitize_input("Sure thing.\nWhat else do you need?"),
+            "Sure thing. What else do you need?",
+        )
+        self.assertEqual(bot.sanitize_input("one\ttwo"), "one two")
+        self.assertEqual(bot.sanitize_input("a\r\nb"), "a b")
+        self.assertEqual(bot.sanitize_input("spaced   out"), "spaced out")
+
     def test_newlines_and_slashes_cannot_reach_the_wire(self):
         """Command injection defence: an allowlist, not a blocklist."""
         bot = make_bot()
