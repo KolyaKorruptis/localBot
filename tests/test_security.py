@@ -50,21 +50,18 @@ def make_bot(**overrides):
     bot.ignore_list = lb.BoundedSet()
     bot.authenticated_users = {}
     bot.user_conversations = {}
-    bot.user_message_buffer = {}
     bot.failed_attempts = lb.BoundedDict()
     bot.last_attempt_time = lb.BoundedDict()
     bot.abuse_strikes = lb.BoundedDict()
     bot.nick_hosts = lb.BoundedDict()
     bot.authenticated_users = lb.BoundedDict()
     bot.user_conversations = lb.BoundedDict()
-    bot.user_message_buffer = lb.BoundedDict()
     bot.channel_transcript = []
     bot.channel_history_limit = 50
     bot.ai_enabled = True
     bot.limiter = lb.RateLimiter()
     bot.generation_slots = threading.BoundedSemaphore(1)
     bot.connection = None
-    bot.logging_enabled = False
     for key, value in overrides.items():
         setattr(bot, key, value)
     return bot

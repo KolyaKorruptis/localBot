@@ -37,7 +37,6 @@ import os
 import re
 import ssl
 import functools
-import subprocess
 import json
 import collections
 
@@ -55,9 +54,7 @@ def load_config(file_path):
 config = load_config(CONFIG_FILE)
 
 SYSTEM_PROMPT_FILE = config["system_prompt_file"]
-SUMMARY_PROMPT_FILE = config["summary_prompt_file"]
 HELP_TEXT_FILE = config["help_text_file"]
-LOG_DIR = config["log_dir"]
 LLM_ENDPOINT = config["llm_endpoint"]
 
 # API key for the LLM endpoint, sent as an OpenAI-style bearer token. LM Studio
@@ -135,7 +132,6 @@ nck = config["default_nickname"]
 srv = config["default_server"]
 prt = config["default_port"]
 chn = config["default_channel"]
-os.makedirs(LOG_DIR, exist_ok=True)
 
 def load_prompt(file_path):
     try:
@@ -146,21 +142,11 @@ def load_prompt(file_path):
 
 
 SYSTEM_PROMPT_TEMPLATE = load_prompt(SYSTEM_PROMPT_FILE)
-SUMMARY_PROMPT_TEMPLATE = load_prompt(SUMMARY_PROMPT_FILE)
 HELP_TEXT = load_prompt(HELP_TEXT_FILE)
 
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
-
-
-def append_to_user_log(logging_enabled, nickname, summary):
-    if not logging_enabled:
-        return
-
-    log_file = os.path.join(LOG_DIR, f"{nickname}.log")
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(f"[{datetime.now()}]\n{summary}\n\n")
 
 
 class BoundedDict(collections.OrderedDict):
@@ -281,47 +267,35 @@ def ask_LLM(
     channel,
     speaker_nickname,
     log_callback=None,
-    logging_enabled=False,
-    summary_mode=False,
     extra_system=None,
 ):
     current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if summary_mode:
-        try:
-            system_prompt = SUMMARY_PROMPT_TEMPLATE.format()
-        except KeyError as e:
-            if log_callback:
-                log_callback(f"Error in SUMMARY_PROMPT_TEMPLATE: Missing key {e}")
-            raise
-    else:
-        try:
-            system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
-                bot_nickname=bot_nickname,
-                server=server,
-                channel=channel,
-                speaker_nickname=speaker_nickname,
-                current_datetime=current_datetime,
-            )
-        except KeyError as e:
-            if log_callback:
-                log_callback(f"Error in SYSTEM_PROMPT_TEMPLATE: Missing key {e}")
-            raise
+    try:
+        system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+            bot_nickname=bot_nickname,
+            server=server,
+            channel=channel,
+            speaker_nickname=speaker_nickname,
+            current_datetime=current_datetime,
+        )
+    except KeyError as e:
+        if log_callback:
+            log_callback(f"Error in SYSTEM_PROMPT_TEMPLATE: Missing key {e}")
+        raise
 
     # Optional extra instructions/context appended to the system prompt (e.g.
     # recent channel transcript). Kept in the system role so the model treats
     # it as background/instructions and does not echo it into its reply.
-    if extra_system and not summary_mode:
+    if extra_system:
         system_prompt = f"{system_prompt}\n\n{extra_system}"
 
     # Keep the "answer briefly" guidance in the system prompt rather than
     # appending it to the user message, so small models cannot echo it back
     # into their visible reply.
-    if not summary_mode:
-        system_prompt = (
-            f"{system_prompt}\n\nAnswer briefly and do not repeat the user's "
-            "message."
-        )
+    system_prompt = (
+        f"{system_prompt}\n\nAnswer briefly and do not repeat the user's message."
+    )
 
     request_messages = [{"role": "system", "content": system_prompt}]
     if conversation_history:
@@ -463,9 +437,8 @@ def ask_LLM(
             )
         return None, None
     except Exception as e:
-        # Report errors whether or not AI logging is on: logging_enabled
-        # controls conversation summaries, not error reporting, and a silent
-        # failure here is indistinguishable from the bot ignoring the user.
+        # Always report: a silent failure here is indistinguishable from the
+        # bot simply having nothing to say.
         if log_callback:
             log_callback(f"LLM - Error: {e}", bold=True)
         return None, None
@@ -480,7 +453,6 @@ class IRCBot:
         channel,
         password,
         log_callback=None,
-        logging_var=True,
         use_ssl=False,
         allow_self_signed=SSL_ALLOW_SELF_SIGNED,
     ):
@@ -492,7 +464,6 @@ class IRCBot:
         self.channel = channel
         self.password_hash = hash_password(password)
         self.log_callback = log_callback
-        self.logging_enabled = logging_var
         self.authenticated_users = BoundedDict()
         # Password failures, keyed by HOST. Keeping this per-nickname made the
         # lockout meaningless: /nick is free, so an attacker reset it at will.
@@ -542,7 +513,6 @@ class IRCBot:
         # silence the bot everywhere at once.
         self.ignore_list = BoundedSet()
         self.user_conversations = BoundedDict()
-        self.user_message_buffer = BoundedDict()
         # Plain-text transcript of recent channel activity, kept as a list of
         # "nick: message" strings. Stored as text (not chat-role messages) so
         # it can be embedded into a single user prompt, which is compatible
@@ -933,10 +903,6 @@ class IRCBot:
             if source not in self.user_conversations:
                 self.user_conversations[source] = []
 
-            if source not in self.user_message_buffer:
-                self.user_message_buffer[source] = []
-            self.user_message_buffer[source].append(message)
-
             if not self.allow_generation(event, source):
                 return
 
@@ -951,7 +917,6 @@ class IRCBot:
                     channel=self.channel,
                     speaker_nickname=source,
                     log_callback=self.log_callback,
-                    logging_enabled=self.logging_enabled,
                 )
 
                 # If the LLM returned nothing (e.g. request error), do not
@@ -972,42 +937,6 @@ class IRCBot:
                 )
 
                 self.send_message(source, response, offender=source)
-
-                if self.logging_enabled and len(self.user_message_buffer[source]) >= 3:
-                    self.log_callback(
-                        "_____________________________________________________ ____ __ _ _"
-                    )
-                    self.log_callback(
-                        f"LLM - Preparing AI-assisted log for {source}..."
-                    )
-                    messages_to_summarize = self.user_message_buffer[source][-3:]
-                    self.user_message_buffer[source] = []
-
-                    summary_history = [
-                        {
-                            "role": "system",
-                            "content": f"{SUMMARY_PROMPT_TEMPLATE}\n\nRemember to swap 'USER' with real user name '{source}' while logging, and that's what {source} wrote:)",
-                        },
-                        {"role": "user", "content": "\n".join(messages_to_summarize)},
-                    ]
-
-                    try:
-                        summary, _ = ask_LLM(
-                            query=None,
-                            conversation_history=summary_history,
-                            bot_nickname=self.nickname,
-                            server=self.server,
-                            channel=self.channel,
-                            speaker_nickname=source,
-                            log_callback=self.log_callback,
-                            logging_enabled=self.logging_enabled,
-                            summary_mode=True,
-                        )
-                        append_to_user_log(self.logging_enabled, source, summary)
-                        self.log_callback(f"BOT - AI-assisted log saved for {source}.")
-
-                    except Exception as e:
-                        self.log_callback(f"LLM - Error generating summary: {str(e)}")
 
             self.dispatch_generation(f"private reply to {source}", generate)
         else:
@@ -1123,7 +1052,6 @@ class IRCBot:
                 channel=self.channel,
                 speaker_nickname=source,
                 log_callback=self.log_callback,
-                logging_enabled=self.logging_enabled,
                 extra_system=extra_system,
             )
 
@@ -1397,7 +1325,6 @@ class App(tk.Tk):
         self.command_var = tk.StringVar()
         self.msg_var = tk.StringVar()
         self.autojoin_var = tk.BooleanVar(value=True)
-        self.logging_var = tk.BooleanVar(value=False)
         self.ssl_var = tk.BooleanVar(value=str(prt) == SSL_PORT)
         # Operator kill switch. Unticking it stops every new generation
         # immediately, without disconnecting the bot from the channel.
@@ -1407,33 +1334,11 @@ class App(tk.Tk):
         # never overwritten by a later edit to the port.
         self.ssl_follows_port = True
         self.bot = None
-        self.logging_var.trace_add("write", self.handle_logging_change)
         self.port_var.trace_add("write", self.handle_port_change)
         self.ai_enabled_var.trace_add("write", self.handle_ai_enabled_change)
 
         self.create_widgets()
         self.create_menu()
-
-    def open_log_folder(self):
-        try:
-            if os.name == "nt":
-                subprocess.Popen(["explorer", LOG_DIR])
-            elif os.name == "posix":
-                subprocess.Popen(
-                    ["open" if "darwin" in os.sys.platform else "xdg-open", LOG_DIR]
-                )
-            else:
-                messagebox.showerror("Error", "Unsupported OS.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to open log folder: {e}")
-
-    def handle_logging_change(self, *args):
-        if self.bot and self.bot.connection and self.logging_var.get():
-            self.logging_var.set(False)
-            messagebox.showwarning(
-                "Logging Warning",
-                "AI Logging must be enabled before connecting to the server.",
-            )
 
     def create_widgets(self):
         param_frame = ttk.LabelFrame(self, text="IRC Connection")
@@ -1465,9 +1370,6 @@ class App(tk.Tk):
             row=3, column=2, sticky="w"
         )
         ttk.Checkbutton(
-            param_frame, text="Enable AI Logging", variable=self.logging_var
-        ).grid(row=4, column=2, sticky="w")
-        ttk.Checkbutton(
             param_frame, text="AI Replies", variable=self.ai_enabled_var
         ).grid(row=2, column=2, sticky="w")
 
@@ -1487,9 +1389,6 @@ class App(tk.Tk):
         ttk.Button(action_frame, text="Disconnect", command=self.disconnect_bot).pack(
             side="left", padx=5
         )
-        ttk.Button(
-            action_frame, text="Open Log Folder", command=self.open_log_folder
-        ).pack(side="left", padx=5)
         msg_frame = ttk.LabelFrame(self, text="Send message to channel")
         msg_frame.pack(padx=10, pady=10, fill="x")
 
@@ -1566,7 +1465,6 @@ class App(tk.Tk):
             channel,
             password,
             log_callback=self.log_message,
-            logging_var=self.logging_var.get(),
             use_ssl=self.ssl_var.get(),
         )
         self.bot.ai_enabled = self.ai_enabled_var.get()

@@ -102,8 +102,8 @@ pin the machine or stall the bot:
   `LOCALBOT_LLM_API_KEY` environment variable.
 - **Authentication failures are reported.** A `401`/`403` is named as such in
   the console instead of looking like the model having nothing to say, and
-  errors are now logged whether or not AI logging is enabled - previously any
-  LLM error was silent unless summaries were switched on.
+  errors are always reported in the console - previously an LLM error was
+  silent unless AI logging happened to be switched on.
 - **More context per request.** Conversation history grew from 10 to 20
   messages and the per-request cap from 5 to 20, and the system prompt is now
   always retained when trimming, so the bot keeps its persona even with a busy
@@ -114,6 +114,15 @@ pin the machine or stall the bot:
   feed into every system prompt; localBot no longer fetches them, drops the
   `feedparser` dependency, and removes `feed_url` from `config.json`. Nothing
   leaves the machine now except the request to your local LLM.
+
+- **AI-assisted conversation logging is gone.** Upstream summarised every three
+  private messages through a second LLM call and appended the result to
+  `user_logs/<nick>.log`. It replaced short, accurate lines with a model's
+  paraphrase, doubled the work on the most expensive path by running inside the
+  same generation slot as the reply, and quietly persisted other people's
+  private messages. Removed along with `summary_prompt.txt`, the `log_dir` and
+  `summary_prompt_file` settings, the *Enable AI Logging* checkbox and the
+  *Open Log Folder* button. Conversations are now held in memory only.
 
 ### Project
 - Renamed from AIRCBot to localBot; the script is now `localbot.py`.
@@ -160,12 +169,6 @@ _Nothing scheduled yet - planned work will be listed here._
 - Supports SSL/TLS connections, with certificate and hostname verification on by default.
 - Inputs/Outputs sanitized to avoid LLM generating and sending raw commands if prompted to do so.
 - Implements an ignore system for users attempting to trick the LLM into generating raw commands (ignore list resets when the program restarts). Ignores are keyed on the hostmask, and a channel can never be ignored.
-
-### Logging Features
-- The bot logs summaries of conversations for authenticated users in the `user_logs` directory.
-- Logs are generated with AI assistance, summarizing the last three user messages in a concise paragraph.
-- Logging must be enabled in the interface before connecting to the IRC server.
-- Each user's conversation history is saved in a separate file for easier review.
 
 ### Command Management
 - Supports sending and receiving IRC commands, with validation for potentially unsafe inputs.
@@ -246,10 +249,10 @@ In the graphical interface, fill in the following fields:
 - **Channel:** IRC channel to join (e.g., `#example`).
 - **Password:** Password required for private messaging authentication. Connection will not be possible if no password is set.
 - **Auto-Join:** Enable or disable automatic channel joining upon connection.
-- **Enable AI Logging:** Option to log AI-assisted summaries of user interactions.
+- **AI Replies:** Kill switch. Untick to stop all new AI generation immediately, without disconnecting from the channel.
 
 ### Customizing Configuration
-Options like the system prompt, summary prompt, logging directory, LLM endpoint, and other defaults are now managed via the `config.json` file. Modify `config.json` to update these values without changing the code.
+Options like the system prompt, LLM endpoint, connection defaults and the abuse limits below are managed via the `config.json` file. Modify `config.json` to update these values without changing the code.
 
 #### `llm_api_key`
 Empty by default, meaning no authentication. Set it to send an
@@ -335,11 +338,7 @@ Make sure your local LLM is up and running, then:
    - Once authenticated, users can interact with the bot's AI brain and get responses.
    - Users will be de-authenticated upon: nick change, channel part, disconnection.
 
-6. **AI-Assisted Summaries:**
-   - If logging is enabled, the bot will summarize user interactions every three messages.
-   - Summaries are concise and saved to the `user_logs` directory under the user's nickname.
-
-7. **Notes on LMStudio**
+6. **Notes on LMStudio**
    - Tested with: Temp 0.55-0.65 / Response Length 100-150 / Context 2000 tokens
    - Similar results with different models, pick your favorite.
    - Download https://lmstudio.ai/

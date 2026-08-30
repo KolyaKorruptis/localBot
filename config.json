@@ -1,8 +1,6 @@
 {
     "system_prompt_file": "system_prompt.txt",
-    "summary_prompt_file": "summary_prompt.txt",
     "help_text_file": "help_text.txt",
-    "log_dir": "user_logs",
     "llm_endpoint": "http://localhost:1234/v1/chat/completions",
     "llm_api_key": "",
     "llm_connect_timeout_seconds": 10,

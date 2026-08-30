@@ -2,13 +2,15 @@ localBot Help:
 
 1. Connection Parameters:
    - Server: Specify the IRC server to connect to.
-   - Port: Enter the server's port number (default is usually 6667).
+   - Port: Enter the server's port number (6667 plain, 6697 for SSL).
+   - SSL: Encrypt the connection. Ticks itself when the port is 6697; tick or
+     untick it by hand to override, and it stops following the port.
    - Nick: Choose the nickname the bot will use.
    - Channel: Define the channel to join (e.g., #example).
    - Password: Provide a password to authenticate the bot.
+   - AI Replies: Kill switch. Untick to stop all new AI generation immediately
+     without disconnecting from the channel.
    - Auto-Join: If enabled, the bot will automatically join the specified channel upon connection.
-   - Enable AI Logging: If enabled, the bot will log summarized conversations for authenticated users.
-     (Note: Logging must be enabled before connecting to the server).
 
 2. Actions:
    - Connect: Establishes a connection to the specified IRC server using the provided parameters.
@@ -20,41 +22,44 @@ localBot Help:
    - Press the 'Send' button or the Enter key to deliver your message.
 
 4. IRC Commands:
-   - Enter an IRC command (e.g., /nick newnick) in the command field and press 'Send'.
-   - Supported commands:
-     - /msg user message: Sends a private message to a specific user.
-     - /kick user [reason]: Removes a user from the channel (optional reason).
-     - /topic [new_topic]: Changes the channel topic.
-     - /quit [message]: Disconnects from the server with an optional goodbye message.
-     - /whois user: Retrieves information about a user.
-     - /op user: Grants operator privileges to a user.
-   - Note: Some commands (e.g., /join) are disabled for security reasons.
+   - Enter an IRC command in the command field and press 'Send'.
+   - Handled explicitly (short forms in brackets):
+     - /join channel [/j]: Joins a channel.
+     - /kick user [reason] [/k]: Removes a user from the channel.
+     - /quit [message] [/q]: Disconnects from the server.
+     - /whois user [/w]: Retrieves information about a user.
+     - /op user [/o]: Grants operator privileges to a user.
+   - Anything else is passed to the server as a raw command, so standard verbs
+     such as /topic work. Note that /msg is not an IRC verb: use /privmsg.
 
 5. AI Interaction:
-   - The bot can generate replies to messages from authenticated users using the configured LLM endpoint.
-   - AI responses are concise and conversational, following IRC netiquette.
-   - User queries are suffixed with '(please answer briefly)' to ensure short responses.
+   - Replies to private messages and /me actions from authenticated users.
+   - Replies in the channel whenever the bot's nickname is mentioned. Channel
+     replies need no authentication and no OP/VOICE status.
+   - Reads the channel passively for context, so replies follow the discussion.
+   - Brevity is requested in the system prompt, not appended to your message.
+   - Generation runs in the background, is rate limited per host, and is capped
+     in length and duration. Excess requests are dropped rather than queued.
 
-6. AI Logging:
-   - If enabled, the bot logs summaries of conversations with authenticated users.
-   - Summaries are stored in the 'user_logs' directory with one log file per user.
-   - Logging must be enabled before connecting to the server.
+6. Authentication:
+   - Users must pass a simple authentication step (e.g., 'Do you love cats?') to
+     exchange private messages with the bot.
+   - After three failed attempts, that host is blocked for 15 minutes. The limit
+     counts per hostmask, so changing nickname does not reset it.
+   - Users are de-authenticated on nick change, channel part, or disconnection.
 
-7. Authentication:
-   - Users must pass a simple authentication step (e.g., 'Do you love cats?') to interact with the bot.
-   - After three failed authentication attempts, users are temporarily blocked for 15 minutes.
-   - Authenticated users can interact with the bot, and their messages are included in conversation history.
-
-8. Troubleshooting:
+7. Troubleshooting:
    - Ensure the server and port details are correct.
+   - Using SSL? Use port 6697. Using 6667? Untick SSL.
    - Verify your internet connection if the bot fails to connect.
    - Use a strong password for better security.
    - Make sure the LLM endpoint is up and running before starting the bot.
 
-9. Console:
-   - Displays server messages, bot activity logs, and user interactions.
+8. Console:
+   - Displays server messages, bot activity, and user interactions.
    - Useful for monitoring bot behavior and debugging issues.
 
-10. Additional Notes:
+9. Additional Notes:
    - The bot automatically re-joins a channel if it is kicked out.
-   - Commands and messages sent by the bot are logged in the console for review.
+   - Commands and messages sent by the bot are shown in the console for review.
+   - Conversations are held in memory only and are not written to disk.
