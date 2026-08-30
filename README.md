@@ -1,6 +1,10 @@
-# AIRCBot: IRC Bot with local LLM Integration
+# localBot: IRC Bot with local LLM Integration
 
-No, not Discord: IRC. This is a generally useless project for a Python-based IRC bot that interacts with a local large language model, to provide conversational AI capabilities. The bot is able of joining an IRC channel, responding to direct messages, fetching the latest news, and managing authenticated user interactions. This document outlines how to install, configure, and use AIRCBot effectively with LMStudio (https://lmstudio.ai/) locally.
+> localBot is a fork of [AIRCBot](https://github.com/davidegat/AIRCBot) by
+> [davidegat](https://github.com/davidegat), maintained independently since 2026.
+> It is not affiliated with or endorsed by the original project.
+
+No, not Discord: IRC. This is a generally useless project for a Python-based IRC bot that interacts with a local large language model, to provide conversational AI capabilities. The bot is able of joining an IRC channel, responding to direct messages, fetching the latest news, and managing authenticated user interactions. This document outlines how to install, configure, and use localBot effectively with LMStudio (https://lmstudio.ai/) locally.
 
 You can easily modify this software to use external APIs if needed (instructions in code comments).
 
@@ -96,14 +100,14 @@ pip install requests feedparser
 1. **Clone the Repository:**
    Download the source code from the repository:
    ```bash
-   git clone https://github.com/davidegat/AIRCBot.git
-   cd aircbot
+   git clone https://github.com/KolyaKorruptis/localBot.git
+   cd localBot
    ```
 
 2. **Run the Script:**
    Execute the Python script using:
    ```bash
-   python aircbot.py
+   python localbot.py
    ```
 3. **LLM (LMStudio)**
    Make sure your local LLM is up and running before connecting to the IRC server, or you will only get a zombie bot parked on a channel.
@@ -214,7 +218,18 @@ Some features are not supported to avoid complexity, or for security reasons:
 
 ## License
 
-AIRCBot is open-source software. See the LICENSE file for details.
+localBot is free software, licensed under the **GNU General Public License,
+version 3**. See the [LICENSE](LICENSE) file for the full text.
+
+localBot is a modified version of AIRCBot, originally written by
+[davidegat](https://github.com/davidegat) and released under the same license.
+Copyright of the original work remains with its author; changes made in this
+fork are Copyright (C) 2026 Nicolai Sandow. A summary of those changes is in
+the header of `localbot.py`, and the full record is in this repository's commit
+history.
+
+This program comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
 
 ---
 

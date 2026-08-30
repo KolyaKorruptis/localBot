@@ -1,4 +1,4 @@
-AIRCBot Help:
+localBot Help:
 
 1. Connection Parameters:
    - Server: Specify the IRC server to connect to.

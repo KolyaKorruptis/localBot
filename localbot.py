@@ -1,3 +1,28 @@
+# localBot - an IRC bot with local LLM integration
+#
+# Copyright (C) 2024-2026 davidegat <https://github.com/davidegat>
+# Copyright (C) 2026 Nicolai Sandow <https://github.com/KolyaKorruptis>
+#
+# This file is part of localBot, a fork of AIRCBot by davidegat
+# (https://github.com/davidegat/AIRCBot).
+#
+# Modifications in this fork (2026, Nicolai Sandow):
+#   - Renamed the project from AIRCBot to localBot.
+#   - Added replies to channel mentions, with passive context reading.
+#   - Fixed channel joining on servers that send no MOTD.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 3 as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import tkinter as tk
 from tkinter import ttk
 from tkinter import scrolledtext, messagebox
@@ -900,7 +925,7 @@ class IRCBot:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("AIRCBot")
+        self.title("localBot")
         self.geometry("750x800")
         self.server_var = tk.StringVar(value=f"{srv}")
         self.port_var = tk.StringVar(value=f"{prt}")
