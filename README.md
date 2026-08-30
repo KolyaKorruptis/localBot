@@ -75,6 +75,11 @@ pin the machine or stall the bot:
   file or load a model because it has no mechanism to, which is a stronger
   guarantee than filtering those phrases out of messages. `tests/test_security.py`
   fails if any of that changes.
+- **Transcript entries cannot span lines.** The channel transcript is fed back
+  to the model as context in `nick: message` form. IRC messages cannot contain
+  newlines, but the bot's own replies are recorded there too and models do emit
+  them, so a multi-line reply could otherwise plant a forged line attributed to
+  another user. Lines are flattened before being recorded.
 - **A tripwire for tool calls.** The bot never requests tools, so a compliant
   endpoint cannot return a tool call. If one arrives anyway, the reply is
   refused and reported loudly - it means the endpoint gained capabilities of
@@ -366,7 +371,11 @@ on that machine:
 - **Keep the server on loopback.** Leave "serve on local network" off so nothing
   but the bot can reach it.
 - **Set an API key** (see `llm_api_key`) so that even on loopback, only the bot
-  can drive the endpoint.
+  can drive the endpoint. This matters more than it first appears: LM Studio
+  serves `POST /api/v1/models/load` and `POST /api/v1/models/download` on the
+  *same port* as chat completions, so the key the bot uses also authorises
+  loading and downloading models. Keep it in the environment variable, never in
+  the tracked `config.json`.
 - **Run LM Studio as a user that cannot read anything you care about**, or in a
   container or VM. Retrieval can only reach files the process can open, and this
   is what turns that from a habit into a guarantee.
@@ -378,6 +387,28 @@ console instead of a silent empty reply.
 > Capability isolation limits the blast radius; it does not stop prompt
 > injection. A channel user can still influence the *wording* of a reply. What
 > they cannot do is cause an action, because no mechanism to act exists.
+
+---
+
+### Running the bot in WSL with LM Studio on Windows
+
+LM Studio binds to `127.0.0.1` on the Windows side by default
+(`networkInterface` in `.lmstudio/.internal/http-server-config.json`). Under
+WSL's default NAT networking that address is unreachable from Linux, so
+`http://localhost:1234/...` in `config.json` will simply fail to connect.
+
+Enable **mirrored networking** rather than exposing the server. Create
+`%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+then run `wsl --shutdown` and reopen the shell. `localhost:1234` now works from
+WSL while LM Studio stays bound to loopback, so nothing is exposed to the local
+network. The alternative - switching LM Studio to "Serve on Local Network" -
+also works, but publishes the endpoint to every machine on your LAN.
 
 ---
 

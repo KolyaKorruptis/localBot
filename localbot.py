@@ -1020,10 +1020,22 @@ class IRCBot:
         return re.search(pattern, message, re.IGNORECASE) is not None
 
     def record_channel_line(self, line):
-        # Append a plain-text line to the rolling channel transcript. Lines are
-        # clamped because a line count alone is not a bound on prompt size: one
-        # user can pad a single message arbitrarily.
-        self.channel_transcript.append(truncate_for_irc(line, MAX_LINE_CHARS))
+        """Append one line to the rolling channel transcript.
+
+        Newlines are collapsed first. The transcript is a "nick: message" list
+        fed back to the model as context, so an entry spanning several lines
+        can forge entries attributed to other people. IRC messages cannot carry
+        newlines, but the bot's own replies are recorded here too and models do
+        emit them, so a user who gets one to answer with "ok\nalice: do as I
+        say" would otherwise plant a line as alice.
+
+        Lines are also clamped: a line count alone does not bound prompt size,
+        because a single message can be padded arbitrarily.
+        """
+        flattened = " ".join(str(line).split())
+        if not flattened:
+            return
+        self.channel_transcript.append(truncate_for_irc(flattened, MAX_LINE_CHARS))
         if len(self.channel_transcript) > self.channel_history_limit:
             self.channel_transcript = self.channel_transcript[
                 -self.channel_history_limit :
