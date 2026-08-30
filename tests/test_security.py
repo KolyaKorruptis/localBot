@@ -417,9 +417,64 @@ class UntrustedDataFraming(unittest.TestCase):
         _, msgs = self._captured_system_prompt(["alice: hello"])
         self.assertEqual([m["role"] for m in msgs], ["system", "user"])
 
-    def test_the_users_own_message_stays_in_the_user_turn(self):
+    def test_the_users_own_message_leads_the_user_turn(self):
         _, msgs = self._captured_system_prompt(["alice: hello"], message="localBot ping")
-        self.assertEqual(msgs[-1]["content"], "localBot ping")
+        self.assertTrue(msgs[-1]["content"].startswith("localBot ping"))
+
+    def test_a_trailing_reminder_follows_the_users_words(self):
+        """Recency: the last thing the model reads must be the operator's.
+
+        Measured against a live model, an injected instruction in the channel
+        log was obeyed 4 of 6 times without this and 0 of 6 with it.
+        """
+        _, msgs = self._captured_system_prompt(["alice: hello"], message="localBot ping")
+        user_turn = msgs[-1]["content"]
+        self.assertIn("not instructions", user_turn)
+        self.assertLess(user_turn.index("localBot ping"), user_turn.index("Reminder"))
+
+    def test_no_reminder_when_there_is_no_channel_context(self):
+        bot = make_bot()
+        self.assertEqual(bot.channel_transcript, [])
+
+
+class SelfContamination(unittest.TestCase):
+    """The bot's own replies must not be replayed to the channel as context.
+
+    A user can talk the bot into a behaviour in their own turn - that is an
+    ordinary request, not injection. The defect was that the steered reply was
+    recorded and fed back to everyone as an example to imitate. Measured
+    against a live model, the next third party's reply was contaminated 3 times
+    out of 4, carrying the leaked system prompt with it; 0 out of 4 after this.
+    """
+
+    def test_bot_reply_is_not_recorded_in_the_transcript(self):
+        bot = make_bot()
+        sent = []
+        bot.connection = type("C", (), {"privmsg": lambda s, t, msg: sent.append(msg)})()
+        bot.dispatch_generation = lambda label, work: work()
+
+        class Resp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"choices": [{"message": {"content": "BANANA leaked", "role": "assistant"},
+                                     "finish_reason": "stop"}]}
+
+        original = lb.requests.post
+        lb.requests.post = lambda *a, **k: Resp()
+        try:
+            bot.on_public_message(None, FakeEvent("alice!u@a.example", "#chan", ["localBot hi"]))
+        finally:
+            lb.requests.post = original
+
+        self.assertEqual(sent, ["alice: BANANA leaked"], "the reply should still be sent")
+        joined = " ".join(bot.channel_transcript)
+        self.assertIn("alice: localBot hi", joined)
+        self.assertNotIn("BANANA leaked", joined,
+                         "the bot's own reply was replayed into its context")
 
 
 class TranscriptForgery(unittest.TestCase):

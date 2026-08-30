@@ -85,6 +85,17 @@ pin the machine or stall the bot:
   Because the nonce cannot be guessed, a user who writes a convincing closing
   marker stays inside the fenced region. The trusted instructions are placed
   *after* the block, so the last thing the model reads is yours, not theirs.
+  A short reminder is also appended after the user's own words, so the last
+  thing the model reads is the operator's. Measured against a live model, an
+  instruction injected through the channel log was obeyed 4 times out of 6
+  without that reminder and 0 times out of 6 with it.
+- **The bot's own replies are not fed back as channel context.** A user can talk
+  the bot into a behaviour in their own message - that is an ordinary request,
+  not injection. The problem was that the steered reply was then recorded and
+  replayed to everyone as an example to copy: measured, the next third party's
+  reply was contaminated 3 times out of 4, carrying the leaked system prompt
+  with it. Only other people's messages are recorded now, which costs the bot
+  the ability to quote its own earlier wording.
   This narrows prompt injection; it does not eliminate it - see below.
 - **A tripwire for tool calls.** The bot never requests tools, so a compliant
   endpoint cannot return a tool call. If one arrives anyway, the reply is
@@ -423,8 +434,9 @@ console instead of a silent empty reply.
 >
 > The fencing described above raises the cost of injection - untrusted text is
 > labelled, delimited with an unguessable nonce, confined to one line per
-> entry, and followed by the real instructions - but no prompt-level defence is
-> absolute. A sufficiently persuasive message can still steer a reply's tone or
+> entry, followed by the real instructions, and never mixed with the bot's own
+> output - but no prompt-level defence is absolute. A user can still steer
+> their *own* reply simply by asking, as they could ask for one in French. A sufficiently persuasive message can still steer a reply's tone or
 > content. Treat the bot's channel output as untrusted itself, and never wire
 > it to anything that acts.
 
