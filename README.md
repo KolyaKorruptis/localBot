@@ -160,11 +160,8 @@ pin the machine or stall the bot:
   through the raw command passthrough in full IRC syntax - but the convenience
   is no longer offered. `/join` remains refused, as upstream had it.
 
-- **The in-app help window is gone.** `help_text.txt` restated what this README
-  already covers, section for section, and keeping the same facts in two places
-  meant both drifted: it went on describing the summary logging weeks after it
-  was deleted. The bot is run from a checkout, so this README is never further
-  away than the help window was. Removed with the Help menu and `show_help`.
+- **The in-app help window and `help_text.txt` are gone.** they restated what
+  this README already covers, and tended to drift during development.
 
 ### Project
 - Renamed from AIRCBot to localBot; the script is now `localbot.py`.
@@ -200,18 +197,6 @@ _Nothing scheduled yet - planned work will be listed here._
 - Displays IRC server console logs in real-time.
 
 <img width="392" height="540" alt="localbot" src="https://github.com/user-attachments/assets/8d9bb3db-f131-4e15-94cf-393f7b1a79a7" />
-
-### The bot speaks only when addressed
-The bot sends a message to the channel in exactly one situation: someone
-mentioned its nickname and the model produced a reply. There is no operator
-field for typing chat into the channel as the bot.
-
-That is deliberate. A line typed by whoever is at the console is
-indistinguishable, to everyone in the channel, from something the bot
-generated - same nickname, same message, no way to tell them apart. If you want
-to say something in the channel, say it as yourself from your own client. It
-also means "the bot only speaks when spoken to" is a property you can rely on
-rather than a convention.
 
 ### Security
 - Requires password-based authentication for private messaging and for replies to `/me` actions.
