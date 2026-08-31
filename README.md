@@ -43,33 +43,25 @@ The changes worth knowing about. Everything is documented in full further down.
   [Locking Down the LLM Endpoint](#locking-down-the-llm-endpoint).
 
 ### Removed
-- **The RSS news feed is gone.** Upstream injected headlines from an external
-  feed into every system prompt; localBot no longer fetches them, drops the
-  `feedparser` dependency, and removes `feed_url` from `config.json`. Nothing
-  leaves the machine now except the request to your local LLM.
+- **The RSS news feed.** Upstream put headlines from an external feed into every
+  system prompt. Nothing leaves the machine now except the request to your local
+  LLM, and `feedparser` is no longer a dependency.
 
-- **AI-assisted conversation logging is gone.** Upstream summarised every three
-  private messages through a second LLM call and appended the result to
-  `user_logs/<nick>.log`. It replaced short, accurate lines with a model's
-  paraphrase, doubled the work on the most expensive path by running inside the
-  same generation slot as the reply, and quietly persisted other people's
-  private messages. Conversations are now held in memory only.
+- **AI-assisted conversation logging.** A second LLM call paraphrased every three
+  private messages into `user_logs/<nick>.log`: worse than the lines it replaced,
+  twice the work on the slowest path, and a quiet record of other people's
+  private conversations. Held in memory only now.
 
-- **The channel message input is gone.** Upstream's GUI had a field that sent
-  whatever the operator typed straight to the channel as the bot. To everyone
-  reading, such a line is indistinguishable from a generated reply: same
-  nickname, same message, nothing to tell them apart. It also broke the one
-  invariant worth having, that the bot speaks only when addressed. Say things
-  in the channel as yourself, from your own client.
+- **The channel message input.** It sent whatever the operator typed to the
+  channel as the bot, indistinguishable from a generated reply. Say things in
+  the channel as yourself.
 
-- **The `/kick` and `/op` shortcuts are gone.** localBot is a conversational
-  bot, not a channel-moderation bot, and offering a one-word kick invites using
-  it as one. Neither verb is actually blocked - both still reach the server
-  through the raw command passthrough in full IRC syntax - but the convenience
-  is no longer offered.
+- **The `/kick` and `/op` shortcuts.** A conversational bot, not a moderation
+  one. Neither verb is blocked - both still work through the raw command
+  passthrough - the convenience is simply not offered.
 
-- **The in-app help window and `help_text.txt` are gone.** They restated what
-  this README already covers, and tended to drift during development.
+- **The in-app help window and `help_text.txt`.** They restated this README and
+  drifted out of date.
 
 ### Project
 - Renamed from AIRCBot to localBot; the script is now `localbot.py`.
