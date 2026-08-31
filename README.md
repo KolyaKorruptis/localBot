@@ -224,8 +224,7 @@ _Nothing scheduled yet - planned work will be listed here._
 - If you can't run a local LLM model, follow instructions in code comments to use your own external API endpoint (like OpenAI API - Please refer to OpenAI documentation for API access). Less privacy is to be expected in this use case. Beware external APIs can charge you money at each request!
 
 ### Python Libraries
-Ensure the following libraries are installed and/or available:
-Only three are not part of the standard library:
+Only three dependencies are not part of the standard library:
 - `tkinter` - the GUI (packaged separately by most distributions)
 - `requests` - HTTP calls to the LLM endpoint
 - `irc` (irc.client) - **version 9.0 or newer**
