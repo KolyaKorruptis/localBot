@@ -7,9 +7,21 @@
 This is a Python-based IRC bot that interacts with a local large language model, to provide conversational AI capabilities.
 
 ---
-## What's Different from AIRCBot
 
-The changes worth knowing about. Everything is documented in full further down.
+## Contents
+
+- [What's Different from AIRCBot](#whats-different-from-aircbot)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Locking Down the LLM Endpoint](#locking-down-the-llm-endpoint)
+- [Running the Tests](#running-the-tests)
+- [License](#license)
+
+---
+## What's Different from AIRCBot
 
 **Conversation**
 - **Replies to mentions in the channel.** Say the bot's nick and it answers,
@@ -56,9 +68,8 @@ The changes worth knowing about. Everything is documented in full further down.
   channel as the bot, indistinguishable from a generated reply. Say things in
   the channel as yourself.
 
-- **The `/kick` and `/op` shortcuts.** A conversational bot, not a moderation
-  one. Neither verb is blocked - both still work through the raw command
-  passthrough - the convenience is simply not offered.
+- **The `/kick` and `/op` shortcuts.** This is not moderation bot. The raw command
+  passthrough still exists.
 
 - **The in-app help window and `help_text.txt`.** They restated this README and
   drifted out of date.
@@ -68,9 +79,6 @@ The changes worth knowing about. Everything is documented in full further down.
 - Added GPLv3 headers and fork attribution, which upstream did not carry.
 - Added a test suite, `tests/test_security.py`.
 - Added a `.gitignore` for Python, Firebase, editor, and log artifacts.
-
-### Planned
-_Nothing scheduled yet - planned work will be listed here._
 
 ---
 
@@ -143,19 +151,20 @@ Every limit is tunable in `config.json`; see
 ## Requirements
 
 ### System Requirements
-- Tested on Python 3.9 or later.
-- Internet connection.
-- LMStudio (https://lmstudio.ai/) or equivalent local language model API.
-- Bot is configured to use LMStudio API at `http://localhost:1234/v1/chat/completions` endpoint (can be changed via `config.json` file).
-- If you can't run a local LLM model, follow instructions in code comments to use your own external API endpoint (like OpenAI API - Please refer to OpenAI documentation for API access). Less privacy is to be expected in this use case. Beware external APIs can charge you money at each request!
+- Python 3.9 or later (developed on 3.12).
+- [LM Studio](https://lmstudio.ai/) or any OpenAI-compatible endpoint, reachable
+  at `llm_endpoint` (default `http://localhost:1234/v1/chat/completions`).
+- An internet connection for IRC. The model runs locally, so nothing but IRC
+  traffic leaves the machine.
+
+A remote API such as OpenAI works too - see the comments in `localbot.py` - at
+the cost of privacy, and of paying per request.
 
 ### Python Libraries
 Only three dependencies are not part of the standard library:
 - `tkinter` - the GUI (packaged separately by most distributions)
 - `requests` - HTTP calls to the LLM endpoint
 - `irc` (irc.client) - **version 9.0 or newer**
-
-If you plan to change the code to use external APIs, consider importing `openai`. Please refer to OpenAI documentation for API access, and code comments for instructions.
 
 Install missing dependencies using (example):
 ```bash
@@ -282,30 +291,19 @@ check. Setting this to `true` lets the bot connect to them anyway:
 
 ## Usage
 
-Make sure your local LLM is up and running, then:
+Start your local LLM, then run `python localbot.py`.
 
-1. **Connect the Bot:**
-   Set your parameters. Please note that bot password is mandatory.
-   Click the "Connect" button.
+1. **Connect.** Fill in the [connection fields](#connection-parameters) - a
+   password is mandatory - and click **Connect**. With **Auto-Join** ticked the
+   bot joins on connect; otherwise click **Join Channel**.
+2. **Talk to it.** Mention its nickname in the channel, or send it a private
+   message and answer its authentication question.
+3. **Send IRC commands.** Use the command field, for example
+   `/msg NickServ REGISTER ...` to register the bot's nickname. There is no
+   field for sending chat to the channel - see *Removed*.
 
-2. **Join a Channel:**
-   "Auto-Join" checkbox will ensure the bot will join channel upon connection, uncheck to get control over it.
-   After connecting, click "Join Channel" to enter the specified IRC channel if Auto-Join is disabled.
-
-3. **Send IRC Commands:**
-   - Use the command input field for IRC commands, for example `/msg NickServ REGISTER ...` to register the bot's nickname.
-   - There is deliberately no field for sending chat messages to the channel: an operator line would be indistinguishable from a generated reply. See *Removed*.
-
-4. **Private Messaging:**
-   - Users can send direct messages to the bot.
-   - The bot will request authentication if the user is not pre-authorized.
-   - Once authenticated, users can interact with the bot's AI brain and get responses.
-   - Users will be de-authenticated upon: nick change, channel part, disconnection.
-
-5. **Notes on LMStudio**
-   - Tested with: Temp 0.55-0.65 / Response Length 100-150 / Context 2000 tokens
-   - Similar results with different models, pick your favorite.
-   - Download https://lmstudio.ai/
+**Model settings:** tested at temperature 0.55-0.65, response length 100-150,
+context 2000 tokens. Similar results across models.
 
 ---
 
