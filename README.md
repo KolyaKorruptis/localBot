@@ -25,11 +25,9 @@ This is a Python-based IRC bot that interacts with a local large language model,
 
 **Conversation**
 - **Replies to mentions in the channel.** Say the bot's nick and it answers,
-  addressing you by name. No OP/VOICE status, no authentication.
+  addressing you by name. 
 - **It reads the channel passively,** so a reply follows what people were
   actually talking about rather than answering in a vacuum.
-- **It does not pretend to be human.** Upstream's prompt told it to hide its
-  nature; ask localBot what it is and it tells you.
 
 **Connection**
 - **SSL/TLS, on by default for port 6697,** with certificate and hostname
@@ -55,24 +53,22 @@ This is a Python-based IRC bot that interacts with a local large language model,
   [Locking Down the LLM Endpoint](#locking-down-the-llm-endpoint).
 
 ### Removed
-- **The RSS news feed.** Upstream put headlines from an external feed into every
-  system prompt. Nothing leaves the machine now except the request to your local
-  LLM, and `feedparser` is no longer a dependency.
-
 - **AI-assisted conversation logging.** A second LLM call paraphrased every three
-  private messages into `user_logs/<nick>.log`: worse than the lines it replaced,
+  private user messages into `user_logs/<nick>.log`: worse than the lines it replaced,
   twice the work on the slowest path, and a quiet record of other people's
-  private conversations. Held in memory only now.
+  private conversations. 
 
 - **The channel message input.** It sent whatever the operator typed to the
-  channel as the bot, indistinguishable from a generated reply. Say things in
-  the channel as yourself.
+  channel as the bot, indistinguishable from a generated reply. 
 
-- **The `/kick` and `/op` shortcuts.** This is not moderation bot. The raw command
+- **The RSS news feed.** Upstream put headlines from an external rss-feed into every
+  system prompt using up tokens, `feedparser` is no longer a dependency.
+
+- **The `/kick` and `/op` shortcuts.** This is not a moderation bot. The raw command
   passthrough still exists.
 
 - **The in-app help window and `help_text.txt`.** They restated this README and
-  drifted out of date.
+  drifted out of sync.
 
 ### Project
 - Renamed from AIRCBot to localBot; the script is now `localbot.py`.
