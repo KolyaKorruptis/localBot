@@ -30,36 +30,35 @@ This is a Python-based IRC bot that interacts with a local large language model,
   actually talking about rather than answering in a vacuum.
 
 **Connection**
-- **SSL/TLS, on by default for port 6697,** with certificate and hostname
+- **SSL/TLS** with certificate and hostname
   verification. See [Configuration](#connection-parameters).
-- **API key authentication** for the LLM endpoint, from the environment rather
-  than a tracked file.
+- **API key authentication** for the LLM endpoint
 
 **Not being a liability in a public channel**
 - **Nothing can pin the machine.** Requests have timeouts, generation runs off
-  the IRC thread, and there is a kill switch in the GUI. Upstream had none of
+  the IRC thread, and there is a kill switch in the GUI now. Upstream had none of
   this: a single slow request stopped the bot answering server PINGs until it
   was disconnected.
-- **Limits are keyed to the hostmask, not the nickname,** so `/nick` no longer
-  resets them. The password lockout was previously decorative - 30 guesses in a
+- **Limits are keyed to the hostmask, not the nickname,** so a nick change no longer
+  resets them. Previously the password lockout was just decorative - 30 guesses in a
   row went through.
 - **Channel text is treated as hostile input.** It reaches the model fenced and
   labelled as data, never mixed with the bot's own output. Measured against a
-  live model, an injected instruction was obeyed 4 times out of 6 before this
-  and 0 times out of 6 after.
+  live model.
 - **The bot cannot act.** It sends no tools and executes nothing, so it cannot
   be talked into fetching a URL or reading a file - and it says so loudly if
   the endpoint ever returns a tool call. See
   [Locking Down the LLM Endpoint](#locking-down-the-llm-endpoint).
 
 ### Removed
-- **AI-assisted conversation logging.** A second LLM call paraphrased every three
-  private user messages into `user_logs/<nick>.log`: worse than the lines it replaced,
-  twice the work on the slowest path, and a quiet record of other people's
-  private conversations. 
+- **AI-assisted conversation logging.** A second LLM call paraphrased private
+  user messages and wrote them to `user_logs/<nick>.log`. The result was worse
+  than the lines it replaced, twice the work on the slowest path, and a quiet
+  record of other people's private conversations with the bot. 
 
 - **The channel message input.** It sent whatever the operator typed to the
-  channel as the bot, indistinguishable from a generated reply. 
+  channel as the bot, indistinguishable from a generated reply. This impersonation
+  broke the rule that the bot only speaks when addressed by its nickname. 
 
 - **The RSS news feed.** Upstream put headlines from an external rss-feed into every
   system prompt using up tokens, `feedparser` is no longer a dependency.
@@ -81,16 +80,16 @@ This is a Python-based IRC bot that interacts with a local large language model,
 ## Features
 
 ### General
-- Connects to IRC servers and channels, plain or over SSL/TLS.
+- Connects to IRC servers and channels, plain text or over SSL/TLS.
 - Joins one channel, manually or automatically on connect.
 - Authenticates users for private interactions, with a personal conversation
   history for each.
 - Replies in the channel whenever its nickname is mentioned. No OP/VOICE status
-  is required, and there is no way to make it speak otherwise.
+  or authorization is required.
 
 ### Conversation
-- Uses a locally hosted language model (via the LMStudio API - download:
-  https://lmstudio.ai/) to generate replies, or any OpenAI-compatible endpoint.
+- Uses a locally hosted language model (via the LMStudio API) to generate replies,
+  or any OpenAI-compatible endpoint.
 - Keeps a rolling transcript of the last 50 channel lines and feeds the most
   recent 15 to the model as background.
 - Matches its nickname as a whole word, case-insensitively, so a nick inside a
@@ -102,19 +101,18 @@ This is a Python-based IRC bot that interacts with a local large language model,
 
 ### Graphical Interface
 - Tkinter GUI for connection setup, IRC commands and console logging.
-- **SSL** checkbox beside the port field.
+- **SSL** checkbox beside the port field, auto-checked on port `6697`.
 - **AI Replies** kill switch: stops all new generation without disconnecting.
 - Displays IRC server console logs in real time.
 
 ### Security
 - Password authentication for private messages and `/me` actions, with
   de-authentication on nick change, channel part or disconnection.
-- Channel replies are deliberately **not** authenticated - anyone in the
-  channel can mention the bot - and are bounded instead: rate limited, capped
-  in length, and stoppable from the UI.
+- Channel replies are deliberately **not** authenticated but and are bounded
+  instead: rate limited, capped in length, and stoppable from the UI.
 - Abuse tracking is keyed on the hostmask, so changing nickname does not reset
   a lockout or an ignore. Password failures and blocked-output strikes are
-  counted separately, and a channel can never be ignored.
+  counted separately, and the channel can never be ignored.
 - Output passes an allowlist, so the model can never emit raw IRC commands,
   newlines or a line over the protocol limit.
 - Every per-user map is size-bounded, so nobody can grow the bot's memory by
@@ -138,7 +136,6 @@ Every limit is tunable in `config.json`; see
   standard verb works if you write the full syntax.
 - `/join` (`/j`) is refused: use the **Join Channel** button or Auto-Join, so
   the bot only ever occupies the one channel it was configured for.
-- `/kick` and `/op` have no shortcuts (see *Removed*).
 - Automated responses to common channel interactions like receiving OP/VOICE.
 - Command logs are displayed in the GUI for transparency.
 
@@ -204,7 +201,7 @@ In the graphical interface, fill in the following fields:
 - **Server:** IRC server address (e.g., `open.ircnet.net`).
 - **Port:** IRC server port (default: `6667`; use `6697` for SSL).
 - **SSL:** Encrypt the connection with TLS. Ticks itself when the port is `6697`; tick or untick it by hand to override, and it will then stop following the port.
-- **Nick:** Bot's IRC nickname (e.g., `Egidio`).
+- **Nick:** Bot's IRC nickname (e.g., `Bathsheba`).
 - **Channel:** IRC channel to join (e.g., `#example`).
 - **Password:** Password required for private messaging authentication. Connection will not be possible if no password is set.
 - **Auto-Join:** Enable or disable automatic channel joining upon connection.
@@ -214,18 +211,11 @@ In the graphical interface, fill in the following fields:
 The LLM endpoint, connection defaults and the abuse limits below are managed via the `config.json` file.
 
 `system_prompt.txt` is read from a fixed path beside `localbot.py` and is
-deliberately **not** configurable. Pointing at it from `config.json` only
-created a way to mistype the path: a missing file used to load as an empty
-string, so one typo left the bot running with no persona, no brevity rule and
-no honesty clause, and nothing reported it. A missing or blank
-`system_prompt.txt` now refuses to start.
-
-This README is the only documentation; there is no in-app help window (see
-*Removed*).
+deliberately **not** configurable. A missing or blank `system_prompt.txt` 
+now refuses to start.
 
 #### `llm_api_key`
-Empty by default, meaning no authentication. Set it to send an
-`Authorization: Bearer <key>` header with every LLM request:
+Empty by default, meaning no authentication. Set it to send an `Authorization: Bearer <key>` header with every LLM request:
 
 ```json
 "llm_api_key": "your-key-here"
@@ -263,9 +253,6 @@ All tunable in `config.json`. The defaults are deliberately conservative:
 | `auth_block_seconds` | `900` | How long that lockout lasts |
 | `abuse_strike_limit` | `5` | Blocked replies charged to one host before it is ignored |
 
-Setting `llm_timeout_seconds` to a very large value re-creates the original
-problem, where a stuck endpoint takes the bot down with it.
-
 #### `ssl_allow_self_signed`
 Off (`false`) by default. When SSL is enabled, localBot verifies the server's
 certificate chain and checks it matches the hostname you connected to. Some
@@ -276,12 +263,11 @@ check. Setting this to `true` lets the bot connect to them anyway:
 "ssl_allow_self_signed": true
 ```
 
-> **This disables certificate verification entirely - both the chain and the
-> hostname check - not just for self-signed certificates.** The connection is
-> still encrypted, but it no longer proves who is on the other end, so it can be
-> intercepted by anyone able to redirect your traffic. Only enable it for a
-> server whose certificate you already trust. localBot logs a warning in the
-> console whenever it connects with verification disabled.
+> **This disables certificate verification entirely.** The connection is
+> still encrypted, but it no longer proves who is on the other end.
+> Only enable it for a server whose certificate you already trust.
+> localBot logs a warning in the console whenever it connects with verification
+> disabled.
 
 ---
 
@@ -293,13 +279,12 @@ Start your local LLM, then run `python localbot.py`.
    password is mandatory - and click **Connect**. With **Auto-Join** ticked the
    bot joins on connect; otherwise click **Join Channel**.
 2. **Talk to it.** Mention its nickname in the channel, or send it a private
-   message and answer its authentication question.
+   message and answer the authentication question with the password you set.
 3. **Send IRC commands.** Use the command field, for example
-   `/msg NickServ REGISTER ...` to register the bot's nickname. There is no
-   field for sending chat to the channel - see *Removed*.
+   `/msg NickServ REGISTER ...` to register the bot's nickname. 
 
 **Model settings:** tested at temperature 0.55-0.65, response length 100-150,
-context 2000 tokens. Similar results across models.
+context 2000 tokens.
 
 ---
 
@@ -362,7 +347,7 @@ on that machine:
 
 None of this is enforceable from the bot, which is why the tripwire exists: if
 LM Studio ever does return a tool call, you will see `LLM - REFUSED` in the
-console instead of a silent empty reply.
+console.
 
 > Capability isolation limits the blast radius; it does not stop prompt
 > injection. A channel user can still influence the *wording* of a reply. What
@@ -373,9 +358,7 @@ console instead of a silent empty reply.
 > entry, followed by the real instructions, and never mixed with the bot's own
 > output - but no prompt-level defence is absolute. A sufficiently persuasive
 > message can still steer a reply's tone or content, and a user can always steer
-> their *own* reply simply by asking, as they could ask for one in French. Treat
-> the bot's channel output as untrusted itself, and never wire it to anything
-> that acts.
+> their *own* reply simply by asking.
 
 ---
 
