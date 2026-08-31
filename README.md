@@ -75,18 +75,16 @@ pin the machine or stall the bot:
   guarantee than filtering those phrases out of messages. `tests/test_security.py`
   fails if any of that changes.
 - **Transcript entries cannot span lines.** The channel transcript is fed back
-  to the model as context in `nick: message` form. IRC messages cannot contain
-  newlines, but the bot's own replies are recorded there too and models do emit
-  them, so a multi-line reply could otherwise plant a forged line attributed to
-  another user. Lines are flattened before being recorded.
+  to the model as context in `nick: message` form, so an entry containing a
+  newline could forge a line attributed to someone else. Whitespace is
+  flattened before anything is recorded.
 - **Channel context is fenced as untrusted data.** The transcript reaches the
   model inside a delimiter carrying a random nonce generated per request, and
   is explicitly labelled as data written by strangers rather than instructions.
   Because the nonce cannot be guessed, a user who writes a convincing closing
-  marker stays inside the fenced region. The trusted instructions are placed
-  *after* the block, so the last thing the model reads is yours, not theirs.
-  A short reminder is also appended after the user's own words, so the last
-  thing the model reads is the operator's. Measured against a live model, an
+  marker stays inside the fenced region. Your instructions follow the block,
+  and a short reminder is appended after the user's own words, so the last
+  thing the model reads is always yours. Measured against a live model, an
   instruction injected through the channel log was obeyed 4 times out of 6
   without that reminder and 0 times out of 6 with it.
 - **The bot's own replies are not fed back as channel context.** A user can talk
@@ -160,7 +158,7 @@ pin the machine or stall the bot:
   through the raw command passthrough in full IRC syntax - but the convenience
   is no longer offered. `/join` remains refused, as upstream had it.
 
-- **The in-app help window and `help_text.txt` are gone.** they restated what
+- **The in-app help window and `help_text.txt` are gone.** They restated what
   this README already covers, and tended to drift during development.
 
 ### Project
@@ -181,7 +179,7 @@ _Nothing scheduled yet - planned work will be listed here._
 - Authenticates users for private interactions.
 - Maintains a conversation history to provide contextually aware responses.
 - Features a personal conversation history for each user.
-- Replies in the channel whenever its nickname is mentioned, and can also be made to speak from the UI. Channel replies need no OP/VOICE status.
+- Replies in the channel whenever its nickname is mentioned. No OP/VOICE status is required, and there is no way to make it speak otherwise.
 
 ### AI-Powered Conversations
 - Uses a locally hosted language model (via LMStudio API - download: https://lmstudio.ai/) to generate replies.
@@ -227,17 +225,10 @@ _Nothing scheduled yet - planned work will be listed here._
 
 ### Python Libraries
 Ensure the following libraries are installed and/or available:
-- `tkinter`
-- `requests`
-- `threading`
-- `time`
-- `os`
-- `subprocess`
-- `json`
-- `datetime`
-- `hashlib`
+Only three are not part of the standard library:
+- `tkinter` - the GUI (packaged separately by most distributions)
+- `requests` - HTTP calls to the LLM endpoint
 - `irc` (irc.client) - **version 9.0 or newer**
-- `ssl`, `functools` (standard library, used for TLS connections)
 
 If you plan to change the code to use external APIs, consider importing `openai`. Please refer to OpenAI documentation for API access, and code comments for instructions.
 
@@ -283,7 +274,7 @@ In the graphical interface, fill in the following fields:
 - **Server:** IRC server address (e.g., `open.ircnet.net`).
 - **Port:** IRC server port (default: `6667`; use `6697` for SSL).
 - **SSL:** Encrypt the connection with TLS. Ticks itself when the port is `6697`; tick or untick it by hand to override, and it will then stop following the port.
-- **Nickname:** Bot's IRC nickname (e.g., `Egidio`).
+- **Nick:** Bot's IRC nickname (e.g., `Egidio`).
 - **Channel:** IRC channel to join (e.g., `#example`).
 - **Password:** Password required for private messaging authentication. Connection will not be possible if no password is set.
 - **Auto-Join:** Enable or disable automatic channel joining upon connection.
@@ -319,8 +310,8 @@ export LOCALBOT_LLM_API_KEY="your-key-here"
 python localbot.py
 ```
 
-The key is never written to the console or to the AI logs; on connect the bot
-only reports whether a key is in use and where it came from.
+The key is never written to the console; on connect the bot reports only that a
+key is in use and which source it came from.
 
 #### Abuse and resource limits
 All tunable in `config.json`. The defaults are deliberately conservative:
@@ -372,21 +363,21 @@ Make sure your local LLM is up and running, then:
    Set your parameters. Please note that bot password is mandatory.
    Click the "Connect" button.
 
-3. **Join a Channel:**
+2. **Join a Channel:**
    "Auto-Join" checkbox will ensure the bot will join channel upon connection, uncheck to get control over it.
    After connecting, click "Join Channel" to enter the specified IRC channel if Auto-Join is disabled.
 
-4. **Send IRC Commands:**
+3. **Send IRC Commands:**
    - Use the command input field for IRC commands, for example `/msg NickServ REGISTER ...` to register the bot's nickname.
-   - There is deliberately no field for sending chat messages to the channel: see *The bot speaks only when addressed* below.
+   - There is deliberately no field for sending chat messages to the channel: an operator line would be indistinguishable from a generated reply. See *Removed*.
 
-5. **Private Messaging:**
+4. **Private Messaging:**
    - Users can send direct messages to the bot.
    - The bot will request authentication if the user is not pre-authorized.
    - Once authenticated, users can interact with the bot's AI brain and get responses.
    - Users will be de-authenticated upon: nick change, channel part, disconnection.
 
-6. **Notes on LMStudio**
+5. **Notes on LMStudio**
    - Tested with: Temp 0.55-0.65 / Response Length 100-150 / Context 2000 tokens
    - Similar results with different models, pick your favorite.
    - Download https://lmstudio.ai/
@@ -461,10 +452,11 @@ console instead of a silent empty reply.
 > The fencing described above raises the cost of injection - untrusted text is
 > labelled, delimited with an unguessable nonce, confined to one line per
 > entry, followed by the real instructions, and never mixed with the bot's own
-> output - but no prompt-level defence is absolute. A user can still steer
-> their *own* reply simply by asking, as they could ask for one in French. A sufficiently persuasive message can still steer a reply's tone or
-> content. Treat the bot's channel output as untrusted itself, and never wire
-> it to anything that acts.
+> output - but no prompt-level defence is absolute. A sufficiently persuasive
+> message can still steer a reply's tone or content, and a user can always steer
+> their *own* reply simply by asking, as they could ask for one in French. Treat
+> the bot's channel output as untrusted itself, and never wire it to anything
+> that acts.
 
 ---
 
