@@ -247,6 +247,13 @@ timeout, an empty reply, or a refused tool call. It stays silent when it
 declines on purpose - rate limited, over the concurrency cap, or **AI Replies**
 switched off - because those exist to stop it talking.
 
+A remark may use `{speaker_nickname}`, `{bot_nickname}` and `{channel}`.
+Substitution is a plain text replacement, not `str.format`, so a joke
+containing braces of its own is safe and a mistyped placeholder shows up in the
+reply instead of raising on the very path that handles a failure. A remark
+containing `{speaker_nickname}` is sent *without* the usual `nick: ` prefix, so
+the name is not said twice.
+
 Remarks are yours, not generated, so they bypass the output allowlist and the
 raw-command filter. Emoji survive, and a remark may open with a word like
 `TIME` without tripping the filter or charging anyone an abuse strike. They are

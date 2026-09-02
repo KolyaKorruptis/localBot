@@ -8,4 +8,13 @@
 # does nothing until you add some. Emoji are fine here; unlike generated
 # replies these lines are not passed through the output allowlist.
 #
+# You can use these placeholders:
+#   {speaker_nickname}  the person the bot is answering
+#   {bot_nickname}      the bot's own nick
+#   {channel}           the channel it joined
+#
+# A remark containing {speaker_nickname} is sent without the usual "nick: "
+# prefix, so the name is not repeated. Anything else in braces is left alone,
+# so a mistyped placeholder shows up in the reply rather than breaking it.
+#
 # Add your remarks below this line.

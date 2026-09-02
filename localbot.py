@@ -197,6 +197,27 @@ def normalize_channel(name):
     return f"#{name}"
 
 
+SPEAKER_PLACEHOLDER = "{speaker_nickname}"
+
+
+def fill_remark(remark, speaker="", bot_nickname="", channel=""):
+    """Substitute the placeholders a remark may use.
+
+    Deliberately str.replace rather than str.format. A remark is a joke someone
+    typed, so it may contain braces of its own, and a mistyped placeholder must
+    not raise: this runs on the path that handles a failed generation, and an
+    exception there would replace the failure report with a crash. An
+    unrecognised token simply survives into the reply, where it is obvious.
+    """
+    for token, value in (
+        (SPEAKER_PLACEHOLDER, speaker),
+        ("{bot_nickname}", bot_nickname),
+        ("{channel}", channel),
+    ):
+        remark = remark.replace(token, value)
+    return remark
+
+
 def random_remark():
     """One of the canned remarks, or None if none are configured."""
     return random.choice(REMARKS) if REMARKS else None
@@ -818,7 +839,7 @@ class IRCBot:
                             "(LLM error?).",
                             bold=True,
                         )
-                        self.send_fallback_remark(source)
+                        self.send_fallback_remark(source, speaker=source)
                         return
 
                     self.user_conversations[source].append(
@@ -1014,7 +1035,7 @@ class IRCBot:
                         f"LLM - No reply generated for {source} (LLM error?).",
                         bold=True,
                     )
-                    self.send_fallback_remark(source)
+                    self.send_fallback_remark(source, speaker=source)
                     return
 
                 self.user_conversations[source].append(
@@ -1169,7 +1190,9 @@ class IRCBot:
                         bold=True,
                     )
                 # Address the mentioning user, as a normal channel reply does.
-                self.send_fallback_remark(self.channel, prefix=f"{source}: ")
+                self.send_fallback_remark(
+                    self.channel, speaker=source, prefix=f"{source}: "
+                )
                 return
 
             # Record the mention, but NOT the bot's own reply. A reply that
@@ -1339,7 +1362,7 @@ class IRCBot:
 
         self.notify(offender, "Warning: your message may trigger unsafe actions.")
 
-    def send_fallback_remark(self, target, prefix=""):
+    def send_fallback_remark(self, target, speaker="", prefix=""):
         """Say something canned when the model produced nothing.
 
         Covers every genuine failure at once, because ask_LLM returns
@@ -1361,6 +1384,17 @@ class IRCBot:
         remark = random_remark()
         if not remark:
             return False
+
+        # A remark that names the speaker itself does not also want the
+        # "nick: " prefix, or the nickname is said twice.
+        if SPEAKER_PLACEHOLDER in remark:
+            prefix = ""
+        remark = fill_remark(
+            remark,
+            speaker=speaker,
+            bot_nickname=self.nickname,
+            channel=self.channel,
+        )
 
         self.notify(target, f"{prefix}{remark}")
         if self.log_callback:

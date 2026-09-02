@@ -140,6 +140,52 @@ class FallbackBehaviour(unittest.TestCase):
         self.assertEqual(sent, [], "a remark reached an ignored user")
 
 
+class Placeholders(unittest.TestCase):
+    def setUp(self):
+        self._saved = lb.REMARKS
+
+    def tearDown(self):
+        lb.REMARKS = self._saved
+
+    def test_known_tokens_are_substituted(self):
+        out = lb.fill_remark(
+            "{bot_nickname} has no idea, {speaker_nickname} - ask in {channel}",
+            speaker="alice",
+            bot_nickname="localBot",
+            channel="#chan",
+        )
+        self.assertEqual(out, "localBot has no idea, alice - ask in #chan")
+
+    def test_an_unknown_token_survives_instead_of_raising(self):
+        """A mistyped placeholder must not crash the failure path."""
+        out = lb.fill_remark("what even is {speaker}?", speaker="alice")
+        self.assertEqual(out, "what even is {speaker}?")
+
+    def test_stray_braces_are_harmless(self):
+        for text in ("¯\\_{ツ}_/¯", "{", "}{", "set {a, b}"):
+            self.assertEqual(lb.fill_remark(text, speaker="alice"), text)
+
+    def test_naming_the_speaker_suppresses_the_prefix(self):
+        lb.REMARKS = ["sorry {speaker_nickname}, my brain melted"]
+        sent = run_channel_mention(make_bot(), content="")
+        self.assertEqual(sent, [("#chan", "sorry alice, my brain melted")])
+
+    def test_a_remark_without_the_token_keeps_the_prefix(self):
+        lb.REMARKS = ["my brain melted"]
+        sent = run_channel_mention(make_bot(), content="")
+        self.assertEqual(sent, [("#chan", "alice: my brain melted")])
+
+    def test_private_fallback_substitutes_too(self):
+        lb.REMARKS = ["not now {speaker_nickname}"]
+        bot = make_bot()
+        sent = []
+        bot.connection = type(
+            "C", (), {"privmsg": lambda s, t, msg: sent.append((t, msg))}
+        )()
+        bot.send_fallback_remark("bob", speaker="bob")
+        self.assertEqual(sent, [("bob", "not now bob")])
+
+
 class RemarksBypassTheOutputFilter(unittest.TestCase):
     """Remarks are operator-authored, so the anti-injection filters must not
     apply to them. A remark opening with an IRC verb would otherwise be blocked
