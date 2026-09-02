@@ -28,6 +28,8 @@ This is a Python-based IRC bot that interacts with a local large language model,
   addressing you by name. 
 - **It reads the channel passively,** so a reply follows what people were
   actually talking about rather than answering in a vacuum.
+- **Random remarks instead of silence.** When a generation fails the bot can
+  answer with a canned one-liner from `remarks.txt` rather than saying nothing.
 
 **Connection**
 - **SSL/TLS** with certificate and hostname
@@ -98,6 +100,8 @@ This is a Python-based IRC bot that interacts with a local large language model,
 - The entire prompt lives in `system_prompt.txt`; nothing is appended in code.
 - Handles empty replies rather than sending a literal `None`, and reports
   request failures in the console instead of failing silently.
+- Optionally answers a failed generation with a random line from
+  [`remarks.txt`](#random-remarks) instead of staying silent.
 
 ### Graphical Interface
 - Tkinter GUI for connection setup, IRC commands and console logging.
@@ -232,6 +236,26 @@ python localbot.py
 
 The key is never written to the console; on connect the bot reports only that a
 key is in use and which source it came from.
+
+#### Random remarks
+`remarks.txt` holds one remark per line. Blank lines are ignored and lines
+starting with `#` are comments, so the file ships inert - add lines to switch
+the feature on.
+
+The bot sends one when a generation produces **nothing**: a request error, a
+timeout, an empty reply, or a refused tool call. It stays silent when it
+declines on purpose - rate limited, over the concurrency cap, or **AI Replies**
+switched off - because those exist to stop it talking.
+
+Remarks are yours, not generated, so they bypass the output allowlist and the
+raw-command filter. Emoji survive, and a remark may open with a word like
+`TIME` without tripping the filter or charging anyone an abuse strike. They are
+still flattened to one line and clamped to the IRC line limit.
+
+> There is no cooldown: one remark per failed generation. If the endpoint goes
+> down, every mention gets an answer - amusing once, noise by the tenth. The
+> **AI Replies** checkbox silences it, and the console still shows the real
+> error.
 
 #### Abuse and resource limits
 All tunable in `config.json`. The defaults are deliberately conservative:

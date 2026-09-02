@@ -1,0 +1,11 @@
+# Random remarks, one per line.
+#
+# The bot sends one of these when a generation produces nothing: a request
+# error, a timeout, an empty reply, or a refused tool call. It stays silent
+# when it declines on purpose - rate limited, busy, or AI Replies switched off.
+#
+# Blank lines are ignored and lines starting with # are comments, so this file
+# does nothing until you add some. Emoji are fine here; unlike generated
+# replies these lines are not passed through the output allowlist.
+#
+# Add your remarks below this line.

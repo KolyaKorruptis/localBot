@@ -34,6 +34,7 @@ import hashlib
 import irc.client
 import irc.connection
 import os
+import random
 import re
 import secrets
 import ssl
@@ -59,6 +60,12 @@ config = load_config(CONFIG_FILE)
 # empty string for a missing file, so a mistyped prompt left the bot running
 # with no persona, no brevity rule and no honesty clause, silently.
 SYSTEM_PROMPT_FILE = "system_prompt.txt"
+
+# Optional canned one-liners, one per line, sent when a generation produces
+# nothing. Absent or comment-only means the bot stays silent on failure, which
+# is what it did before this existed.
+REMARKS_FILE = "remarks.txt"
+
 LLM_ENDPOINT = config["llm_endpoint"]
 
 # API key for the LLM endpoint, sent as an OpenAI-style bearer token. LM Studio
@@ -161,6 +168,19 @@ def load_prompt(file_path, required=True):
 
 
 SYSTEM_PROMPT_TEMPLATE = load_prompt(SYSTEM_PROMPT_FILE)
+
+# Whitespace is flattened at load time so a stray tab or a trailing newline can
+# never reach privmsg, where the irc library rejects line breaks outright.
+REMARKS = [
+    " ".join(line.split())
+    for line in load_prompt(REMARKS_FILE, required=False).splitlines()
+    if line.strip() and not line.lstrip().startswith("#")
+]
+
+
+def random_remark():
+    """One of the canned remarks, or None if none are configured."""
+    return random.choice(REMARKS) if REMARKS else None
 
 
 def hash_password(password):
@@ -462,10 +482,20 @@ def ask_LLM(
             return None, None
 
         return assistant_message.get("content"), assistant_message.get("role")
+    except requests.exceptions.ConnectTimeout:
+        # Reported separately from a read timeout, and checked first because
+        # ConnectTimeout is a subclass of Timeout. Naming the read timeout here
+        # would claim the bot waited a minute when it gave up in ten seconds.
+        if log_callback:
+            log_callback(
+                f"LLM - Could not reach the endpoint within "
+                f"{LLM_CONNECT_TIMEOUT:g}s. Is it running?",
+                bold=True,
+            )
+        return None, None
     except requests.exceptions.Timeout:
-        # Distinct from a generic error: the endpoint accepted the request and
-        # then took too long, which is what a resource-exhaustion attempt looks
-        # like from here.
+        # The endpoint accepted the request and then took too long, which is
+        # what a resource-exhaustion attempt looks like from here.
         if log_callback:
             log_callback(
                 f"LLM - Timed out after {LLM_TIMEOUT:g}s, giving up on this "
@@ -769,6 +799,7 @@ class IRCBot:
                             "(LLM error?).",
                             bold=True,
                         )
+                        self.send_fallback_remark(source)
                         return
 
                     self.user_conversations[source].append(
@@ -964,6 +995,7 @@ class IRCBot:
                         f"LLM - No reply generated for {source} (LLM error?).",
                         bold=True,
                     )
+                    self.send_fallback_remark(source)
                     return
 
                 self.user_conversations[source].append(
@@ -1117,6 +1149,8 @@ class IRCBot:
                         "LLM - No channel response generated (LLM error?).",
                         bold=True,
                     )
+                # Address the mentioning user, as a normal channel reply does.
+                self.send_fallback_remark(self.channel, prefix=f"{source}: ")
                 return
 
             # Record the mention, but NOT the bot's own reply. A reply that
@@ -1285,6 +1319,34 @@ class IRCBot:
             return
 
         self.notify(offender, "Warning: your message may trigger unsafe actions.")
+
+    def send_fallback_remark(self, target, prefix=""):
+        """Say something canned when the model produced nothing.
+
+        Covers every genuine failure at once, because ask_LLM returns
+        (None, None) for a request error, a timeout and a refused tool call
+        alike. It is deliberately not used when the bot declines on purpose -
+        rate limited, over the concurrency cap, or switched off - since those
+        exist to stop it talking.
+
+        Routed through notify() rather than send_message(): these lines are
+        written by the operator, not generated, so neither the output allowlist
+        nor the raw-command filter applies. That matters twice. A remark opening
+        with a word like "TIME" would otherwise trip the filter and charge a
+        strike to whoever happened to be talking, and the allowlist would strip
+        any emoji.
+        """
+        if not self.ai_enabled:
+            return False
+
+        remark = random_remark()
+        if not remark:
+            return False
+
+        self.notify(target, f"{prefix}{remark}")
+        if self.log_callback:
+            self.log_callback(f"BOT - Sent a fallback remark to {target}.")
+        return True
 
     def notify(self, nickname, text):
         """Send bot-authored text, bypassing the output filter and strikes.
