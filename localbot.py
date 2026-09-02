@@ -178,6 +178,25 @@ REMARKS = [
 ]
 
 
+# The prefixes IRC uses for channel names. Shared so that normalising a name
+# and recognising one cannot drift apart: is_channel() is what stops a channel
+# being ignored or charged an abuse strike.
+CHANNEL_PREFIXES = ("#", "&", "+", "!")
+
+
+def normalize_channel(name):
+    """Add a leading '#' to a channel name typed without one.
+
+    Servers will not find "casale"; they want "#casale". The other valid
+    prefixes are left alone, and an empty value stays empty rather than
+    becoming a bare "#".
+    """
+    name = (name or "").strip()
+    if not name or name.startswith(CHANNEL_PREFIXES):
+        return name
+    return f"#{name}"
+
+
 def random_remark():
     """One of the canned remarks, or None if none are configured."""
     return random.choice(REMARKS) if REMARKS else None
@@ -528,7 +547,7 @@ class IRCBot:
         self.use_ssl = use_ssl
         self.allow_self_signed = allow_self_signed
         self.nickname = nickname
-        self.channel = channel
+        self.channel = normalize_channel(channel)
         self.password_hash = hash_password(password)
         self.log_callback = log_callback
         self.authenticated_users = BoundedDict()
@@ -636,7 +655,7 @@ class IRCBot:
 
     @staticmethod
     def is_channel(target):
-        return bool(target) and target.startswith(("#", "&", "+", "!"))
+        return bool(target) and target.startswith(CHANNEL_PREFIXES)
 
     def allow_generation(self, event, source):
         """Rate-limit gate. Logs and returns False when the request is denied."""
@@ -1560,8 +1579,17 @@ class App(tk.Tk):
         server = self.server_var.get()
         port = self.port_var.get()
         nickname = self.nick_var.get()
-        channel = self.channel_var.get()
+        typed_channel = self.channel_var.get()
+        channel = normalize_channel(typed_channel)
         password = self.password_var.get()
+
+        if channel != typed_channel:
+            # Show the corrected name rather than silently joining something
+            # other than what is on screen.
+            self.channel_var.set(channel)
+            self.log_message(
+                f"BOT - Channel name corrected to {channel}.", bold=True
+            )
 
         if not password:
             self.prompt_password()

@@ -206,7 +206,7 @@ In the graphical interface, fill in the following fields:
 - **Port:** IRC server port (default: `6667`; use `6697` for SSL).
 - **SSL:** Encrypt the connection with TLS. Ticks itself when the port is `6697`; tick or untick it by hand to override, and it will then stop following the port.
 - **Nick:** Bot's IRC nickname (e.g., `Bathsheba`).
-- **Channel:** IRC channel to join (e.g., `#example`).
+- **Channel:** IRC channel to join (e.g., `#example`). A missing `#` is added for you, so `example` works too.
 - **Password:** Password required for private messaging authentication. Connection will not be possible if no password is set.
 - **Auto-Join:** Enable or disable automatic channel joining upon connection.
 - **AI Replies:** Kill switch. Untick to stop all new AI generation immediately, without disconnecting from the channel.
